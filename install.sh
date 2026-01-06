@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Worktree Installer
+# wt Installer
 # Install: curl -sSf https://raw.githubusercontent.com/amiller68/worktree/main/install.sh | bash
 
 set -e
@@ -8,7 +8,6 @@ set -e
 REPO_URL="https://github.com/amiller68/worktree.git"
 INSTALL_DIR="$HOME/.local/share/worktree"
 BIN_DIR="$HOME/.local/bin"
-COMMAND_NAME="worktree"
 
 # Colors
 RED='\033[0;31m'
@@ -17,7 +16,17 @@ BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-echo -e "${BLUE}Installing worktree...${NC}"
+# Shell function to add
+SHELL_FUNC='# wt - git worktree manager
+wt() {
+    if [[ "$1" == "open" || "$1" == "-o" ]]; then
+        eval "$(_wt "$@")"
+    else
+        _wt "$@"
+    fi
+}'
+
+echo -e "${BLUE}Installing wt...${NC}"
 
 # Check for git
 if ! command -v git &> /dev/null; then
@@ -40,18 +49,34 @@ else
 fi
 
 # Make executable
-chmod +x "$INSTALL_DIR/worktree.sh"
+chmod +x "$INSTALL_DIR/_wt.sh"
 
-# Create symlink
-TARGET="$BIN_DIR/$COMMAND_NAME"
+# Create symlink for _wt
+TARGET="$BIN_DIR/_wt"
 if [ -L "$TARGET" ]; then
     rm "$TARGET"
 elif [ -e "$TARGET" ]; then
     echo -e "${RED}Error: $TARGET exists and is not a symlink${NC}"
     exit 1
 fi
+ln -s "$INSTALL_DIR/_wt.sh" "$TARGET"
 
-ln -s "$INSTALL_DIR/worktree.sh" "$TARGET"
+# Add shell function to rc files
+add_shell_func() {
+    local rc_file="$1"
+    if [ -f "$rc_file" ]; then
+        if ! grep -q "^wt()" "$rc_file" 2>/dev/null; then
+            echo "" >> "$rc_file"
+            echo "$SHELL_FUNC" >> "$rc_file"
+            echo -e "${GREEN}Added wt function to $rc_file${NC}"
+        else
+            echo -e "${YELLOW}wt function already in $rc_file${NC}"
+        fi
+    fi
+}
+
+add_shell_func "$HOME/.bashrc"
+add_shell_func "$HOME/.zshrc"
 
 # Get version
 VERSION="unknown"
@@ -59,7 +84,8 @@ if [ -f "$INSTALL_DIR/manifest.toml" ]; then
     VERSION=$(grep '^version' "$INSTALL_DIR/manifest.toml" | cut -d'"' -f2)
 fi
 
-echo -e "${GREEN}Installed worktree $VERSION${NC}"
+echo ""
+echo -e "${GREEN}Installed wt $VERSION${NC}"
 echo -e "  ${BLUE}Location:${NC} $INSTALL_DIR"
 echo -e "  ${BLUE}Command:${NC}  $TARGET"
 
@@ -67,11 +93,10 @@ echo -e "  ${BLUE}Command:${NC}  $TARGET"
 if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
     echo ""
     echo -e "${YELLOW}Warning: $BIN_DIR is not in your PATH${NC}"
-    echo "Add this to your shell profile (~/.bashrc, ~/.zshrc, etc.):"
+    echo "Add this to your shell profile:"
     echo ""
     echo "  export PATH=\"\$HOME/.local/bin:\$PATH\""
-    echo ""
 fi
 
 echo ""
-echo -e "${GREEN}Done! Run 'worktree --help' to get started.${NC}"
+echo -e "${GREEN}Done! Restart your shell, then run 'wt' to get started.${NC}"

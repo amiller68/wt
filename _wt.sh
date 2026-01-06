@@ -17,30 +17,29 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 print_usage() {
-    echo "Usage: worktree [-o] <command> [worktree-name] [branch-name]"
+    echo "Usage: wt [-o] <command> [worktree-name] [branch-name]"
     echo ""
     echo "Manages git worktrees within the current repository's .worktrees/ directory."
     echo "Run this command from anywhere inside a git repository."
     echo ""
     echo "Options:"
     echo "  -o                      - Open: cd to worktree directory after create"
-    echo "                            (use with eval: eval \"\$(worktree -o create <name>)\")"
     echo ""
     echo "Commands:"
     echo "  create <name> [branch]  - Create a new worktree (branch defaults to new branch from origin/dev)"
     echo "  list                    - List all worktrees"
     echo "  remove <name>           - Remove a worktree"
-    echo "  open <name>             - Output cd command for worktree (use with eval)"
+    echo "  open <name>             - cd to worktree directory"
     echo "  cleanup                 - Remove all worktrees"
-    echo "  update                  - Update worktree to latest version"
+    echo "  update                  - Update wt to latest version"
     echo "  version                 - Show version info"
     echo ""
     echo "Examples:"
-    echo "  worktree create feature-branch"
-    echo "  eval \"\$(worktree -o create feature-branch)\"   # create and cd"
-    echo "  eval \"\$(worktree open feature-branch)\"        # cd to existing"
-    echo "  worktree list"
-    echo "  worktree update"
+    echo "  wt create feature-branch"
+    echo "  wt -o create feature-branch   # create and cd"
+    echo "  wt open feature-branch        # cd to existing"
+    echo "  wt list"
+    echo "  wt update"
 }
 
 detect_repo() {
@@ -108,7 +107,7 @@ create_worktree() {
     if [ "$OPEN_AFTER" = "true" ]; then
         open_worktree "$name"
     else
-        echo -e "${YELLOW}To open: eval \"\$(worktree open $name)\"${NC}" >&2
+        echo -e "${YELLOW}To open: wt open $name${NC}" >&2
     fi
 }
 
@@ -201,7 +200,7 @@ get_version() {
 
 show_version() {
     local version=$(get_version)
-    echo -e "${BLUE}worktree${NC} $version"
+    echo -e "${BLUE}wt${NC} $version"
 }
 
 update_worktree() {
