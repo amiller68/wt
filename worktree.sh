@@ -1,0 +1,281 @@
+#!/bin/bash
+
+# Git Worktree Setup Script for Multiple Claude Code Instances
+# This script helps create separate git worktrees for working with multiple
+# instances of Claude Code on any git repository
+
+set -e
+
+# Install location (set by installer)
+INSTALL_DIR="${WORKTREE_INSTALL_DIR:-$HOME/.local/share/worktree}"
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+print_usage() {
+    echo "Usage: worktree [-o] <command> [worktree-name] [branch-name]"
+    echo ""
+    echo "Manages git worktrees within the current repository's .worktrees/ directory."
+    echo "Run this command from anywhere inside a git repository."
+    echo ""
+    echo "Options:"
+    echo "  -o                      - Open: cd to worktree directory after create"
+    echo "                            (use with eval: eval \"\$(worktree -o create <name>)\")"
+    echo ""
+    echo "Commands:"
+    echo "  create <name> [branch]  - Create a new worktree (branch defaults to new branch from origin/dev)"
+    echo "  list                    - List all worktrees"
+    echo "  remove <name>           - Remove a worktree"
+    echo "  open <name>             - Output cd command for worktree (use with eval)"
+    echo "  cleanup                 - Remove all worktrees"
+    echo "  update                  - Update worktree to latest version"
+    echo "  version                 - Show version info"
+    echo ""
+    echo "Examples:"
+    echo "  worktree create feature-branch"
+    echo "  eval \"\$(worktree -o create feature-branch)\"   # create and cd"
+    echo "  eval \"\$(worktree open feature-branch)\"        # cd to existing"
+    echo "  worktree list"
+    echo "  worktree update"
+}
+
+detect_repo() {
+    REPO_DIR=$(git rev-parse --show-toplevel 2>/dev/null)
+    if [ -z "$REPO_DIR" ]; then
+        echo -e "${RED}Error: Not inside a git repository${NC}"
+        exit 1
+    fi
+    WORKTREES_BASE_DIR="$REPO_DIR/.worktrees"
+}
+
+ensure_worktrees_excluded() {
+    local exclude_file="$REPO_DIR/.git/info/exclude"
+    if [ -f "$exclude_file" ]; then
+        if ! grep -q "^\.worktrees$" "$exclude_file" 2>/dev/null; then
+            echo ".worktrees" >> "$exclude_file"
+        fi
+    fi
+}
+
+create_worktree() {
+    local name="$1"
+    local branch="${2:-$name}"
+    local worktree_path="$WORKTREES_BASE_DIR/$name"
+
+    if [ -z "$name" ]; then
+        echo -e "${RED}Error: Worktree name is required${NC}"
+        print_usage
+        exit 1
+    fi
+
+    if [ -d "$worktree_path" ]; then
+        echo -e "${RED}Error: Worktree '$name' already exists at $worktree_path${NC}"
+        exit 1
+    fi
+
+    echo -e "${BLUE}Creating worktree '$name' from branch '$branch'...${NC}"
+
+    # Ensure .worktrees is in .git/info/exclude
+    ensure_worktrees_excluded
+
+    # Create the base directory if it doesn't exist
+    mkdir -p "$WORKTREES_BASE_DIR"
+
+    # Change to repository directory and create worktree
+    cd "$REPO_DIR"
+
+    # If using default branch name (same as worktree), check if branch exists
+    if [ "$branch" = "$name" ]; then
+        # Check if branch exists locally or remotely
+        if git show-ref --verify --quiet "refs/heads/$name" || git show-ref --verify --quiet "refs/remotes/origin/$name"; then
+            echo -e "${YELLOW}Using existing branch '$name'${NC}"
+            git worktree add "$worktree_path" "$name"
+        else
+            echo -e "${YELLOW}Creating new branch '$name' from origin/dev${NC}"
+            git worktree add -b "$name" "$worktree_path" origin/dev
+        fi
+    else
+        git worktree add "$worktree_path" "$branch"
+    fi
+
+    echo -e "${GREEN}Worktree created successfully!${NC}" >&2
+    echo -e "${YELLOW}Path: $worktree_path${NC}" >&2
+
+    if [ "$OPEN_AFTER" = "true" ]; then
+        open_worktree "$name"
+    else
+        echo -e "${YELLOW}To open: eval \"\$(worktree open $name)\"${NC}" >&2
+    fi
+}
+
+list_worktrees() {
+    echo -e "${BLUE}Git worktrees:${NC}"
+    cd "$REPO_DIR"
+    git worktree list
+
+    echo ""
+    echo -e "${BLUE}Available worktree directories:${NC}"
+    if [ -d "$WORKTREES_BASE_DIR" ]; then
+        ls -la "$WORKTREES_BASE_DIR"
+    else
+        echo "No worktrees directory found"
+    fi
+}
+
+remove_worktree() {
+    local name="$1"
+    local worktree_path="$WORKTREES_BASE_DIR/$name"
+
+    if [ -z "$name" ]; then
+        echo -e "${RED}Error: Worktree name is required${NC}"
+        print_usage
+        exit 1
+    fi
+
+    if [ ! -d "$worktree_path" ]; then
+        echo -e "${RED}Error: Worktree '$name' does not exist${NC}"
+        exit 1
+    fi
+
+    echo -e "${YELLOW}Removing worktree '$name'...${NC}"
+
+    cd "$REPO_DIR"
+    git worktree remove "$worktree_path"
+
+    echo -e "${GREEN}Worktree removed successfully!${NC}"
+}
+
+open_worktree() {
+    local name="$1"
+    local worktree_path="$WORKTREES_BASE_DIR/$name"
+
+    if [ -z "$name" ]; then
+        echo -e "${RED}Error: Worktree name is required${NC}" >&2
+        print_usage >&2
+        exit 1
+    fi
+
+    if [ ! -d "$worktree_path" ]; then
+        echo -e "${RED}Error: Worktree '$name' does not exist${NC}" >&2
+        exit 1
+    fi
+
+    # Output cd command for eval (stdout only)
+    echo "cd \"$worktree_path\""
+}
+
+cleanup_worktrees() {
+    echo -e "${YELLOW}Cleaning up all worktrees...${NC}"
+
+    if [ -d "$WORKTREES_BASE_DIR" ]; then
+        cd "$REPO_DIR"
+
+        # Remove all worktrees
+        for worktree_dir in "$WORKTREES_BASE_DIR"/*; do
+            if [ -d "$worktree_dir" ]; then
+                local name=$(basename "$worktree_dir")
+                echo "Removing worktree: $name"
+                git worktree remove "$worktree_dir" 2>/dev/null || true
+            fi
+        done
+
+        # Remove the base directory
+        rm -rf "$WORKTREES_BASE_DIR"
+    fi
+
+    echo -e "${GREEN}Cleanup complete!${NC}"
+}
+
+get_version() {
+    local manifest="$INSTALL_DIR/manifest.toml"
+    if [ -f "$manifest" ]; then
+        grep '^version' "$manifest" | cut -d'"' -f2
+    else
+        echo "unknown"
+    fi
+}
+
+show_version() {
+    local version=$(get_version)
+    echo -e "${BLUE}worktree${NC} $version"
+}
+
+update_worktree() {
+    if [ ! -d "$INSTALL_DIR/.git" ]; then
+        echo -e "${RED}Error: Install directory is not a git repository${NC}"
+        echo "Reinstall with: curl -sSf https://raw.githubusercontent.com/amiller68/worktree/main/install.sh | bash"
+        exit 1
+    fi
+
+    local old_version=$(get_version)
+    echo -e "${BLUE}Updating worktree...${NC}"
+
+    cd "$INSTALL_DIR"
+    git pull --ff-only origin main
+
+    local new_version=$(get_version)
+    if [ "$old_version" = "$new_version" ]; then
+        echo -e "${GREEN}Already up to date ($new_version)${NC}"
+    else
+        echo -e "${GREEN}Updated: $old_version -> $new_version${NC}"
+    fi
+}
+
+# Parse arguments
+OPEN_AFTER="false"
+
+# Check for flags
+while [[ "$1" == -* ]]; do
+    case "$1" in
+        -o)
+            OPEN_AFTER="true"
+            shift
+            ;;
+        *)
+            echo -e "${RED}Error: Unknown flag $1${NC}"
+            print_usage
+            exit 1
+            ;;
+    esac
+done
+
+# Commands that don't need a git repo
+case "$1" in
+update)
+    update_worktree
+    exit 0
+    ;;
+version)
+    show_version
+    exit 0
+    ;;
+esac
+
+# All other commands need a git repo
+detect_repo
+
+case "$1" in
+create)
+    create_worktree "$2" "$3"
+    ;;
+list)
+    list_worktrees
+    ;;
+remove)
+    remove_worktree "$2"
+    ;;
+open)
+    open_worktree "$2"
+    ;;
+cleanup)
+    cleanup_worktrees
+    ;;
+*)
+    print_usage
+    exit 1
+    ;;
+esac
