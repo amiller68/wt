@@ -16,16 +16,6 @@ BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-# Shell function to add
-SHELL_FUNC='# wt - git worktree manager
-wt() {
-    if [[ "$1" == "open" || "$1" == "-o" ]]; then
-        eval "$(_wt "$@")"
-    else
-        _wt "$@"
-    fi
-}'
-
 echo -e "${BLUE}Installing wt...${NC}"
 
 # Check for git
@@ -61,22 +51,26 @@ elif [ -e "$TARGET" ]; then
 fi
 ln -s "$INSTALL_DIR/_wt.sh" "$TARGET"
 
-# Add shell function to rc files
-add_shell_func() {
+# Add source line to rc files
+add_source_line() {
     local rc_file="$1"
+    local shell_file="$2"
+    local source_line="[ -f $shell_file ] && source $shell_file"
+
     if [ -f "$rc_file" ]; then
-        if ! grep -q "^wt()" "$rc_file" 2>/dev/null; then
+        if ! grep -q "worktree/shell/wt" "$rc_file" 2>/dev/null; then
             echo "" >> "$rc_file"
-            echo "$SHELL_FUNC" >> "$rc_file"
-            echo -e "${GREEN}Added wt function to $rc_file${NC}"
+            echo "# wt - git worktree manager" >> "$rc_file"
+            echo "$source_line" >> "$rc_file"
+            echo -e "${GREEN}Added wt to $rc_file${NC}"
         else
-            echo -e "${YELLOW}wt function already in $rc_file${NC}"
+            echo -e "${YELLOW}wt already in $rc_file${NC}"
         fi
     fi
 }
 
-add_shell_func "$HOME/.bashrc"
-add_shell_func "$HOME/.zshrc"
+add_source_line "$HOME/.bashrc" "$INSTALL_DIR/shell/wt.bash"
+add_source_line "$HOME/.zshrc" "$INSTALL_DIR/shell/wt.zsh"
 
 # Get version
 VERSION="unknown"
