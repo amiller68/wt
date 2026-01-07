@@ -51,3 +51,13 @@ claude
 ```
 
 Both instances work independently with their own branches.
+
+## Testing
+
+Run the test suite:
+
+```bash
+./test.sh
+```
+
+Tests cover create, list, open, remove, and nested path handling.
