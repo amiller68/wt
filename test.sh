@@ -255,6 +255,49 @@ if [[ -d "$TEST_DIR/.worktrees/cleanup-force-test" ]]; then
     cd "$TEST_DIR"
 fi
 assert_dir_not_exists "$TEST_DIR/.worktrees/cleanup-force-test" "cleanup --force removes dirty worktree"
+
+# Test: cleanup from dirty worktree shows error message
+echo "--- Test: cleanup from dirty worktree shows error ---"
+_wt create cleanup-dirty-error 2>/dev/null
+cd "$TEST_DIR/.worktrees/cleanup-dirty-error"
+echo "dirty" > dirty.txt
+git add dirty.txt
+output=$(_wt cleanup 2>&1) || true
+cd "$TEST_DIR"
+[[ "$output" == *"uncommitted"* ]] && result="has error msg" || result="no error msg"
+assert_eq "has error msg" "$result" "cleanup from dirty worktree shows error"
+assert_dir_exists "$TEST_DIR/.worktrees/cleanup-dirty-error" "dirty worktree not removed"
+# Cleanup
+_wt remove cleanup-dirty-error --force 2>/dev/null
+
+# Test: cleanup from base skips dirty worktrees
+echo "--- Test: cleanup from base skips dirty ---"
+_wt create cleanup-skip-clean 2>/dev/null
+_wt create cleanup-skip-dirty 2>/dev/null
+cd "$TEST_DIR/.worktrees/cleanup-skip-dirty"
+echo "dirty" > dirty.txt
+git add dirty.txt
+cd "$TEST_DIR"
+output=$(_wt cleanup 2>&1)
+[[ "$output" == *"Skipping"* ]] && result="shows skip" || result="no skip msg"
+assert_eq "shows skip" "$result" "cleanup shows skip message for dirty"
+assert_dir_not_exists "$TEST_DIR/.worktrees/cleanup-skip-clean" "clean worktree removed"
+assert_dir_exists "$TEST_DIR/.worktrees/cleanup-skip-dirty" "dirty worktree preserved"
+# Cleanup
+_wt remove cleanup-skip-dirty --force 2>/dev/null
+
+# Test: cleanup --force from base removes dirty worktrees
+echo "--- Test: cleanup --force from base removes all ---"
+_wt create cleanup-force-all1 2>/dev/null
+_wt create cleanup-force-all2 2>/dev/null
+cd "$TEST_DIR/.worktrees/cleanup-force-all2"
+echo "dirty" > dirty.txt
+git add dirty.txt
+cd "$TEST_DIR"
+_wt cleanup --force 2>/dev/null
+assert_dir_not_exists "$TEST_DIR/.worktrees/cleanup-force-all1" "force removes clean worktree"
+assert_dir_not_exists "$TEST_DIR/.worktrees/cleanup-force-all2" "force removes dirty worktree"
+
 # Test: on-create hook set/get
 echo "--- Test: on-create hook set/get ---"
 _wt config on-create 'echo hello' 2>/dev/null

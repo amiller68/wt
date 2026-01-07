@@ -386,6 +386,13 @@ get_worktree_names() {
     done
 }
 
+# Check if a worktree has uncommitted changes
+is_worktree_dirty() {
+    local worktree_path="$1"
+    # Check if worktree has uncommitted changes (staged or unstaged)
+    git -C "$worktree_path" status --porcelain 2>/dev/null | grep -q .
+}
+
 # Resolve worktree name to full path
 resolve_worktree_path() {
     local name="$1"
@@ -548,14 +555,22 @@ open_worktree() {
 cleanup_worktrees() {
     local force="$1"
     local force_flag=""
-    [[ "$force" == "--force" ]] && force_flag="--force"
+    [[ "$force" == "--force" || "$force" == "-f" ]] && force_flag="--force"
 
     local current_worktree=$(get_current_worktree)
 
     if [ -n "$current_worktree" ]; then
         # In a worktree - remove just this one and return to base
-        echo -e "${YELLOW}Removing worktree: $current_worktree${NC}" >&2
         local worktree_path="$WORKTREES_BASE_DIR/$current_worktree"
+
+        # Check if worktree is dirty
+        if is_worktree_dirty "$worktree_path" && [ -z "$force_flag" ]; then
+            echo -e "${RED}Error: Current worktree has uncommitted changes${NC}" >&2
+            echo -e "Use ${YELLOW}wt cleanup --force${NC} to remove anyway" >&2
+            exit 1
+        fi
+
+        echo -e "${YELLOW}Removing worktree: $current_worktree${NC}" >&2
 
         # Output cd command FIRST (so shell wrapper can eval it)
         echo "cd \"$REPO_DIR\""
@@ -571,17 +586,33 @@ cleanup_worktrees() {
         if [ -d "$WORKTREES_BASE_DIR" ]; then
             cd "$REPO_DIR"
 
+            local skipped=0
             # Remove all worktrees
             for worktree_dir in "$WORKTREES_BASE_DIR"/*; do
                 if [ -d "$worktree_dir" ]; then
                     local name=$(basename "$worktree_dir")
+
+                    # Check if worktree is dirty
+                    if is_worktree_dirty "$worktree_dir" && [ -z "$force_flag" ]; then
+                        echo -e "${YELLOW}Skipping${NC} $name (has uncommitted changes)" >&2
+                        ((skipped++))
+                        continue
+                    fi
+
                     echo "Removing worktree: $name" >&2
                     git worktree remove $force_flag "$worktree_dir" 2>/dev/null || true
                 fi
             done
 
-            # Remove the base directory
-            rm -rf "$WORKTREES_BASE_DIR"
+            # Only remove the base directory if all worktrees were removed
+            if [ "$skipped" -eq 0 ]; then
+                rm -rf "$WORKTREES_BASE_DIR"
+            fi
+
+            if [ "$skipped" -gt 0 ]; then
+                echo -e "${YELLOW}Skipped $skipped worktree(s) with uncommitted changes${NC}" >&2
+                echo -e "Use ${YELLOW}wt cleanup --force${NC} to remove all" >&2
+            fi
         fi
 
         echo -e "${GREEN}Cleanup complete!${NC}" >&2
