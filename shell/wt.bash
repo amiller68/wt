@@ -5,8 +5,8 @@
 [[ ":$PATH:" != *":$HOME/.local/bin:"* ]] && export PATH="$HOME/.local/bin:$PATH"
 
 wt() {
-    # Eval output if command might cd (open, or create with -o flag)
-    if [[ "$1" == "open" || "$1" == "-o" || "$2" == "-o" || "$*" == *"-o"* ]]; then
+    # Eval output if command might cd (open, cleanup, or create with -o flag)
+    if [[ "$1" == "open" || "$1" == "cleanup" || "$1" == "-o" || "$2" == "-o" || "$*" == *"-o"* ]]; then
         eval "$(_wt "$@")"
     else
         _wt "$@"

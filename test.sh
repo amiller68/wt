@@ -196,6 +196,66 @@ assert_eq "unset" "$result" "config base --global --unset works"
 # Clean up repo config for next tests
 _wt config base --unset 2>/dev/null
 
+# Test: cleanup from worktree removes only that worktree
+echo "--- Test: cleanup from worktree ---"
+_wt create cleanup-test1 2>/dev/null
+_wt create cleanup-test2 2>/dev/null
+# cd into worktree and run cleanup
+cd "$TEST_DIR/.worktrees/cleanup-test1"
+output=$(_wt cleanup 2>/dev/null)
+cd "$TEST_DIR"  # return to base for assertions
+assert_dir_not_exists "$TEST_DIR/.worktrees/cleanup-test1" "cleanup removed current worktree"
+assert_dir_exists "$TEST_DIR/.worktrees/cleanup-test2" "cleanup preserved other worktree"
+
+# Test: cleanup outputs cd command to base repo
+echo "--- Test: cleanup outputs cd to base ---"
+_wt create cleanup-cd-test 2>/dev/null
+cd "$TEST_DIR/.worktrees/cleanup-cd-test"
+output=$(_wt cleanup 2>/dev/null)
+cd "$TEST_DIR"
+[[ "$output" == *"cd "* ]] && result="contains cd" || result="no cd"
+assert_eq "contains cd" "$result" "cleanup outputs cd command"
+# Handle macOS /var -> /private/var symlink
+expected_path=$(cd "$TEST_DIR" && pwd -P)
+[[ "$output" == *"$expected_path"* ]] && result="correct path" || result="wrong path"
+assert_eq "correct path" "$result" "cleanup cd points to base repo"
+
+# Test: cleanup from base repo removes all worktrees
+echo "--- Test: cleanup from base repo ---"
+_wt create cleanup-all1 2>/dev/null
+_wt create cleanup-all2 2>/dev/null
+cd "$TEST_DIR"
+_wt cleanup 2>/dev/null
+assert_dir_not_exists "$TEST_DIR/.worktrees/cleanup-all1" "cleanup all removed worktree 1"
+assert_dir_not_exists "$TEST_DIR/.worktrees/cleanup-all2" "cleanup all removed worktree 2"
+assert_dir_not_exists "$TEST_DIR/.worktrees" "cleanup all removed .worktrees dir"
+
+# Test: cleanup --force from worktree with uncommitted changes
+echo "--- Test: cleanup --force with changes ---"
+_wt create cleanup-force-test 2>/dev/null
+cd "$TEST_DIR/.worktrees/cleanup-force-test"
+echo "uncommitted change" > testfile.txt
+git add testfile.txt
+# Regular cleanup should fail (uncommitted changes)
+output=$(_wt cleanup 2>&1) || true
+cd "$TEST_DIR"
+# Worktree should still exist (removal failed)
+if [[ -d "$TEST_DIR/.worktrees/cleanup-force-test" ]]; then
+    echo -e "${GREEN}PASS${NC}: cleanup without --force preserves dirty worktree"
+    ((PASS++))
+else
+    echo -e "${RED}FAIL${NC}: cleanup without --force removed dirty worktree"
+    ((FAIL++))
+fi
+# Now force cleanup
+cd "$TEST_DIR/.worktrees/cleanup-force-test" 2>/dev/null || cd "$TEST_DIR"
+if [[ -d "$TEST_DIR/.worktrees/cleanup-force-test" ]]; then
+    cd "$TEST_DIR/.worktrees/cleanup-force-test"
+    _wt cleanup --force 2>/dev/null
+    cd "$TEST_DIR"
+fi
+assert_dir_not_exists "$TEST_DIR/.worktrees/cleanup-force-test" "cleanup --force removes dirty worktree"
+
 # Cleanup
 echo ""
 echo "--- Cleanup ---"
