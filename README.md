@@ -36,7 +36,8 @@ source ~/.zshrc  # or ~/.bashrc
 | `wt list` | List worktrees in `.worktrees/` |
 | `wt list --all` | List all git worktrees |
 | `wt remove <pattern>` | Remove worktree(s) matching pattern (supports glob) |
-| `wt cleanup` | Remove all worktrees |
+| `wt cleanup` | Remove current worktree (or all from base repo), skips dirty |
+| `wt cleanup --force` | Remove even if worktree has uncommitted changes |
 | `wt config` | Show config for current repo |
 | `wt config base <branch>` | Set base branch for current repo |
 | `wt config base --global <branch>` | Set global default base branch |
