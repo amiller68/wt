@@ -54,10 +54,29 @@ print_usage() {
 }
 
 detect_repo() {
-    if ! REPO_DIR=$(git rev-parse --show-toplevel 2>/dev/null); then
+    if ! git rev-parse --show-toplevel &>/dev/null; then
         echo -e "${RED}Error: Not inside a git repository${NC}" >&2
         exit 1
     fi
+
+    # Get the common git dir (shared across all worktrees)
+    local git_common_dir=$(git rev-parse --git-common-dir 2>/dev/null)
+
+    # If git-common-dir ends with .git, the base repo is its parent
+    # If it ends with .git/worktrees/<name>, we're in a worktree
+    if [[ "$git_common_dir" == */.git ]]; then
+        # In the base repo
+        REPO_DIR="${git_common_dir%/.git}"
+    elif [[ "$git_common_dir" == */.git/worktrees/* ]]; then
+        # In a worktree - base repo is parent of .git
+        REPO_DIR="${git_common_dir%/.git/worktrees/*}"
+    else
+        # Fallback to show-toplevel
+        REPO_DIR=$(git rev-parse --show-toplevel 2>/dev/null)
+    fi
+
+    # Resolve symlinks for consistent path comparison (e.g., /tmp -> /private/tmp on macOS)
+    REPO_DIR=$(cd "$REPO_DIR" && pwd -P)
     WORKTREES_BASE_DIR="$REPO_DIR/.worktrees"
 }
 
@@ -335,6 +354,23 @@ handle_config() {
     esac
 }
 
+# Get the current worktree name if we're inside one, empty otherwise
+get_current_worktree() {
+    local current_dir=$(pwd -P)  # Resolve symlinks
+
+    # Check if we're under the .worktrees directory
+    case "$current_dir" in
+        "$WORKTREES_BASE_DIR"/*)
+            # Extract the worktree name (first path component after .worktrees/)
+            local relative="${current_dir#$WORKTREES_BASE_DIR/}"
+            echo "${relative%%/*}"
+            return 0
+            ;;
+    esac
+
+    return 1
+}
+
 # Get list of worktree names in .worktrees (handles nested paths like feature/auth/login)
 get_worktree_names() {
     if [ ! -d "$WORKTREES_BASE_DIR" ]; then
@@ -510,25 +546,46 @@ open_worktree() {
 }
 
 cleanup_worktrees() {
-    echo -e "${YELLOW}Cleaning up all worktrees...${NC}"
+    local force="$1"
+    local force_flag=""
+    [[ "$force" == "--force" ]] && force_flag="--force"
 
-    if [ -d "$WORKTREES_BASE_DIR" ]; then
+    local current_worktree=$(get_current_worktree)
+
+    if [ -n "$current_worktree" ]; then
+        # In a worktree - remove just this one and return to base
+        echo -e "${YELLOW}Removing worktree: $current_worktree${NC}" >&2
+        local worktree_path="$WORKTREES_BASE_DIR/$current_worktree"
+
+        # Output cd command FIRST (so shell wrapper can eval it)
+        echo "cd \"$REPO_DIR\""
+
+        # Then remove the worktree (from base repo context)
         cd "$REPO_DIR"
+        git worktree remove $force_flag "$worktree_path" >&2
+        echo -e "${GREEN}Done!${NC}" >&2
+    else
+        # In base repo - existing behavior (remove all)
+        echo -e "${YELLOW}Cleaning up all worktrees...${NC}" >&2
 
-        # Remove all worktrees
-        for worktree_dir in "$WORKTREES_BASE_DIR"/*; do
-            if [ -d "$worktree_dir" ]; then
-                local name=$(basename "$worktree_dir")
-                echo "Removing worktree: $name"
-                git worktree remove "$worktree_dir" 2>/dev/null || true
-            fi
-        done
+        if [ -d "$WORKTREES_BASE_DIR" ]; then
+            cd "$REPO_DIR"
 
-        # Remove the base directory
-        rm -rf "$WORKTREES_BASE_DIR"
+            # Remove all worktrees
+            for worktree_dir in "$WORKTREES_BASE_DIR"/*; do
+                if [ -d "$worktree_dir" ]; then
+                    local name=$(basename "$worktree_dir")
+                    echo "Removing worktree: $name" >&2
+                    git worktree remove $force_flag "$worktree_dir" 2>/dev/null || true
+                fi
+            done
+
+            # Remove the base directory
+            rm -rf "$WORKTREES_BASE_DIR"
+        fi
+
+        echo -e "${GREEN}Cleanup complete!${NC}" >&2
     fi
-
-    echo -e "${GREEN}Cleanup complete!${NC}"
 }
 
 get_version() {
@@ -655,7 +712,7 @@ open)
     open_worktree "$2"
     ;;
 cleanup)
-    cleanup_worktrees
+    cleanup_worktrees "$2"
     ;;
 config)
     shift  # remove 'config'
