@@ -12,15 +12,26 @@ wt() {
     fi
 }
 
-# Get worktree names for completion (fast: just lists .worktrees/ dirs)
+# Get worktree names for completion (handles nested paths like feature/auth/login)
 _wt_get_worktrees() {
     local repo=$(git rev-parse --show-toplevel 2>/dev/null)
     local wt_dir="$repo/.worktrees"
     [[ -d "$wt_dir" ]] || return
-    # List immediate subdirs - handles simple names
-    for d in "$wt_dir"/*/; do
-        [[ -d "$d" ]] && basename "$d"
-    done
+
+    # Recursively find worktrees (dirs with .git file) without entering their content
+    _find_wt() {
+        local dir="$1" prefix="$2"
+        for entry in "$dir"/*/; do
+            [[ -d "$entry" ]] || continue
+            local name=$(basename "$entry")
+            if [[ -f "$entry/.git" ]]; then
+                echo "${prefix}${name}"
+            else
+                _find_wt "$entry" "${prefix}${name}/"
+            fi
+        done
+    }
+    _find_wt "$wt_dir" ""
 }
 
 # Completion
