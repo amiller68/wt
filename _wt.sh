@@ -26,18 +26,24 @@ print_usage() {
     echo "  -o                      - Open: cd to worktree directory after create"
     echo ""
     echo "Commands:"
-    echo "  create <name> [branch]  - Create a new worktree (branch defaults to new branch from origin/dev)"
+    echo "  create <name> [branch]  - Create a new worktree (branch defaults to configured base)"
     echo "  list [--all]            - List worktrees (--all shows all git worktrees)"
     echo "  remove <name>           - Remove a worktree"
     echo "  open <name>             - cd to worktree directory"
     echo "  cleanup                 - Remove all worktrees"
+    echo "  config                  - Show base branch config for current repo"
+    echo "  config base <branch>    - Set base branch for current repo"
+    echo "  config base --global <branch> - Set global default base branch"
+    echo "  config --list           - List all configuration"
     echo "  update [--force]        - Update wt to latest version"
     echo "  version                 - Show version info"
+    echo "  which                   - Show path to wt script"
     echo ""
     echo "Examples:"
     echo "  wt create feature/auth/login"
     echo "  wt -o create feature-branch   # create and cd"
     echo "  wt open feature/auth/login    # cd to existing"
+    echo "  wt config base origin/main    # set base branch for this repo"
     echo "  wt list"
     echo "  wt update"
 }
@@ -57,6 +63,188 @@ ensure_worktrees_excluded() {
             echo ".worktrees" >> "$exclude_file"
         fi
     fi
+}
+
+# Configuration helpers
+get_config_file() {
+    local config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/wt"
+    echo "$config_dir/config"
+}
+
+get_config_value() {
+    local key="$1"
+    local config_file=$(get_config_file)
+    if [ -f "$config_file" ]; then
+        grep "^${key}=" "$config_file" 2>/dev/null | cut -d'=' -f2-
+    fi
+}
+
+set_config_value() {
+    local key="$1"
+    local value="$2"
+    local config_file=$(get_config_file)
+    local config_dir=$(dirname "$config_file")
+
+    # Create config directory if needed
+    mkdir -p "$config_dir"
+
+    # Create file if it doesn't exist
+    touch "$config_file"
+
+    # Remove existing entry for this key
+    local tmp_file=$(mktemp)
+    grep -v "^${key}=" "$config_file" > "$tmp_file" 2>/dev/null || true
+    mv "$tmp_file" "$config_file"
+
+    # Add new entry
+    echo "${key}=${value}" >> "$config_file"
+}
+
+unset_config_value() {
+    local key="$1"
+    local config_file=$(get_config_file)
+
+    if [ ! -f "$config_file" ]; then
+        return
+    fi
+
+    local tmp_file=$(mktemp)
+    grep -v "^${key}=" "$config_file" > "$tmp_file" 2>/dev/null || true
+    mv "$tmp_file" "$config_file"
+}
+
+get_base_branch() {
+    # Resolution order: repo-specific -> global default -> hardcoded default
+    local repo_root=$(git rev-parse --show-toplevel 2>/dev/null)
+
+    # Try repo-specific config
+    if [ -n "$repo_root" ]; then
+        local repo_base=$(get_config_value "$repo_root")
+        if [ -n "$repo_base" ]; then
+            echo "$repo_base"
+            return
+        fi
+    fi
+
+    # Try global default
+    local global_base=$(get_config_value "_default")
+    if [ -n "$global_base" ]; then
+        echo "$global_base"
+        return
+    fi
+
+    # Hardcoded fallback
+    echo "origin/main"
+}
+
+handle_config() {
+    local subcommand="$1"
+    shift || true
+
+    case "$subcommand" in
+        ""|"show")
+            # Show config for current repo
+            local repo_root=$(git rev-parse --show-toplevel 2>/dev/null)
+            local repo_base=""
+            local global_base=$(get_config_value "_default")
+
+            if [ -n "$repo_root" ]; then
+                repo_base=$(get_config_value "$repo_root")
+            fi
+
+            if [ -n "$repo_base" ]; then
+                echo -e "${BLUE}Repository:${NC} $repo_base"
+            fi
+            if [ -n "$global_base" ]; then
+                echo -e "${BLUE}Global default:${NC} $global_base"
+            fi
+            if [ -z "$repo_base" ] && [ -z "$global_base" ]; then
+                echo -e "${YELLOW}No config set. Using default: origin/main${NC}"
+            fi
+            echo -e "${BLUE}Effective base branch:${NC} $(get_base_branch)"
+            ;;
+        "base")
+            local is_global=false
+            local is_unset=false
+            local branch=""
+
+            # Parse arguments
+            while [ $# -gt 0 ]; do
+                case "$1" in
+                    --global|-g)
+                        is_global=true
+                        shift
+                        ;;
+                    --unset)
+                        is_unset=true
+                        shift
+                        ;;
+                    *)
+                        branch="$1"
+                        shift
+                        ;;
+                esac
+            done
+
+            if [ "$is_global" = true ]; then
+                if [ "$is_unset" = true ]; then
+                    unset_config_value "_default"
+                    echo -e "${GREEN}Global default unset${NC}"
+                elif [ -n "$branch" ]; then
+                    set_config_value "_default" "$branch"
+                    echo -e "${GREEN}Global default set to: $branch${NC}"
+                else
+                    local val=$(get_config_value "_default")
+                    if [ -n "$val" ]; then
+                        echo "$val"
+                    else
+                        echo -e "${YELLOW}No global default set${NC}"
+                    fi
+                fi
+            else
+                local repo_root=$(git rev-parse --show-toplevel 2>/dev/null)
+                if [ -z "$repo_root" ]; then
+                    echo -e "${RED}Error: Not inside a git repository${NC}" >&2
+                    exit 1
+                fi
+
+                if [ "$is_unset" = true ]; then
+                    unset_config_value "$repo_root"
+                    echo -e "${GREEN}Config unset for: $repo_root${NC}"
+                elif [ -n "$branch" ]; then
+                    set_config_value "$repo_root" "$branch"
+                    echo -e "${GREEN}Base branch set to: $branch${NC}"
+                else
+                    local val=$(get_config_value "$repo_root")
+                    if [ -n "$val" ]; then
+                        echo "$val"
+                    else
+                        echo -e "${YELLOW}No config set for this repository${NC}"
+                    fi
+                fi
+            fi
+            ;;
+        "--list"|"-l")
+            local config_file=$(get_config_file)
+            if [ -f "$config_file" ] && [ -s "$config_file" ]; then
+                echo -e "${BLUE}Configuration:${NC}"
+                while IFS='=' read -r key value; do
+                    if [ "$key" = "_default" ]; then
+                        echo -e "  ${YELLOW}[global]${NC} $value"
+                    else
+                        echo -e "  $key = $value"
+                    fi
+                done < "$config_file"
+            else
+                echo -e "${YELLOW}No configuration set${NC}"
+            fi
+            ;;
+        *)
+            echo -e "${RED}Error: Unknown config subcommand '$subcommand'${NC}" >&2
+            echo "Usage: wt config [base [--global] [--unset] [branch]] [--list]" >&2
+            exit 1
+            ;;
+    esac
 }
 
 # Get list of worktree names in .worktrees (handles nested paths like feature/auth/login)
@@ -123,8 +311,12 @@ create_worktree() {
             echo -e "${YELLOW}Using existing branch '$name'${NC}" >&2
             git worktree add "$worktree_path" "$name" >&2
         else
-            echo -e "${YELLOW}Creating new branch '$name' from origin/dev${NC}" >&2
-            git worktree add -b "$name" "$worktree_path" origin/dev >&2
+            local base_branch=$(get_base_branch)
+            echo -e "${YELLOW}Creating new branch '$name' from $base_branch${NC}" >&2
+            git worktree add -b "$name" "$worktree_path" "$base_branch" >&2
+            # Configure push to use same branch name on remote
+            git -C "$worktree_path" config push.autoSetupRemote true
+            git -C "$worktree_path" branch --unset-upstream 2>/dev/null || true
         fi
     else
         git worktree add "$worktree_path" "$branch" >&2
@@ -317,6 +509,11 @@ version)
     show_version
     exit 0
     ;;
+which)
+    # Show path to this script
+    echo "$0"
+    exit 0
+    ;;
 esac
 
 # All other commands need a git repo
@@ -349,6 +546,10 @@ open)
     ;;
 cleanup)
     cleanup_worktrees
+    ;;
+config)
+    shift  # remove 'config'
+    handle_config "$@"
     ;;
 *)
     print_usage

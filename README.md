@@ -8,6 +8,7 @@ Git worktree manager for running parallel Claude Code sessions.
 
 - **Simple commands** - Create, list, open, and remove worktrees with short commands
 - **Auto-isolation** - Worktrees stored in `.worktrees/` (automatically git-ignored)
+- **Configurable base branch** - Set per-repo or global default base branch
 - **Shell integration** - Tab completion for commands and worktree names
 - **Nested paths** - Supports branch names like `feature/auth/login`
 - **Self-updating** - Run `wt update` to get the latest version
@@ -32,11 +33,16 @@ source ~/.zshrc  # or ~/.bashrc
 | `wt open <name>` | cd into an existing worktree |
 | `wt list` | List worktrees in `.worktrees/` |
 | `wt list --all` | List all git worktrees |
-| `wt remove <pattern>` | Remove worktree(s) matching pattern (supports regex) |
+| `wt remove <pattern>` | Remove worktree(s) matching pattern (supports glob) |
 | `wt cleanup` | Remove all worktrees |
+| `wt config` | Show base branch config for current repo |
+| `wt config base <branch>` | Set base branch for current repo |
+| `wt config base --global <branch>` | Set global default base branch |
+| `wt config --list` | List all configuration |
 | `wt update` | Update wt to latest version |
 | `wt update --force` | Force update (reset to remote) |
 | `wt version` | Show version |
+| `wt which` | Show path to wt script |
 
 ## Usage
 
@@ -93,6 +99,37 @@ wt remove 'test*'            # Remove all starting with "test"
 wt remove 'feature/*'        # Remove all under feature/
 ```
 
+### Configure base branch
+
+By default, new branches are created from `origin/main`. You can configure this per-repo or globally:
+
+```bash
+# Set base branch for current repo
+wt config base origin/develop
+
+# Set global default (used when no repo config exists)
+wt config base --global origin/main
+
+# View current config
+wt config
+
+# List all configuration
+wt config --list
+
+# Unset repo config
+wt config base --unset
+
+# Unset global default
+wt config base --global --unset
+```
+
+Configuration is stored in `~/.config/wt/config` (follows XDG spec).
+
+**Resolution order:**
+1. Repo-specific config
+2. Global default
+3. Hardcoded fallback (`origin/main`)
+
 ## How it works
 
 Worktrees are stored in `.worktrees/` inside your repo:
@@ -118,9 +155,10 @@ Each worktree is a full checkout of your repo on its own branch. Changes in one 
 Both bash and zsh get tab completion:
 
 ```bash
-wt <TAB>           # Shows: create list open remove cleanup update version
+wt <TAB>           # Shows: create list open remove cleanup config update version
 wt open <TAB>      # Shows available worktrees
 wt remove <TAB>    # Shows available worktrees
+wt config <TAB>    # Shows: base --list
 ```
 
 ### How the -o flag works
@@ -134,6 +172,24 @@ eval "cd ..."        # shell function evals it
 ```
 
 This is why `wt open` can change your current directory.
+
+### Why `which wt` doesn't work
+
+Since `wt` is a shell function (required for `cd` functionality), `which wt` shows the function definition instead of a path. Use this instead:
+
+```bash
+wt which    # Shows path to the underlying _wt script
+```
+
+## Development
+
+To test local changes without affecting your installed version:
+
+```bash
+source ./dev.sh
+```
+
+This only affects the current terminal session. Open a new terminal to go back to your installed version.
 
 ## Testing
 

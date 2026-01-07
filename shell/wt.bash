@@ -41,7 +41,7 @@ _wt_complete() {
     local prev=${COMP_WORDS[COMP_CWORD-1]}
 
     if [[ $COMP_CWORD -eq 1 ]]; then
-        COMPREPLY=($(compgen -W "create list remove open cleanup update version -o" -- "$cur"))
+        COMPREPLY=($(compgen -W "create list remove open cleanup config update version which -o" -- "$cur"))
     elif [[ $COMP_CWORD -eq 2 ]]; then
         case $prev in
             open|remove)
@@ -54,8 +54,17 @@ _wt_complete() {
             update)
                 COMPREPLY=($(compgen -W "--force" -- "$cur"))
                 ;;
+            config)
+                COMPREPLY=($(compgen -W "base --list" -- "$cur"))
+                ;;
             -o)
                 COMPREPLY=($(compgen -W "create" -- "$cur"))
+                ;;
+        esac
+    elif [[ $COMP_CWORD -eq 3 ]]; then
+        case ${COMP_WORDS[2]} in
+            base)
+                COMPREPLY=($(compgen -W "--global --unset" -- "$cur"))
                 ;;
         esac
     fi

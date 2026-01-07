@@ -45,8 +45,10 @@ _wt_completion() {
         'remove:Remove a worktree'
         'open:cd to worktree directory'
         'cleanup:Remove all worktrees'
+        'config:Configure base branch settings'
         'update:Update wt to latest version'
         'version:Show version info'
+        'which:Show path to wt script'
     )
 
     if (( CURRENT == 2 )); then
@@ -65,8 +67,17 @@ _wt_completion() {
             update)
                 compadd -- '--force'
                 ;;
+            config)
+                compadd -- 'base' '--list'
+                ;;
             -o)
                 compadd -- 'create'
+                ;;
+        esac
+    elif (( CURRENT == 4 )); then
+        case ${words[3]} in
+            base)
+                compadd -- '--global' '--unset'
                 ;;
         esac
     fi
