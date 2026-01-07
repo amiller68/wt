@@ -9,6 +9,7 @@ Git worktree manager for running parallel Claude Code sessions.
 - **Simple commands** - Create, list, open, and remove worktrees with short commands
 - **Auto-isolation** - Worktrees stored in `.worktrees/` (automatically git-ignored)
 - **Configurable base branch** - Set per-repo or global default base branch
+- **On-create hooks** - Run setup commands automatically after worktree creation
 - **Shell integration** - Tab completion for commands and worktree names
 - **Nested paths** - Supports branch names like `feature/auth/login`
 - **Self-updating** - Run `wt update` to get the latest version
@@ -30,14 +31,17 @@ source ~/.zshrc  # or ~/.bashrc
 |---------|-------------|
 | `wt create <name> [branch]` | Create a worktree with a new branch |
 | `wt create <name> -o` | Create and cd into the worktree |
+| `wt create <name> --no-hooks` | Create without running on-create hook |
 | `wt open <name>` | cd into an existing worktree |
 | `wt list` | List worktrees in `.worktrees/` |
 | `wt list --all` | List all git worktrees |
 | `wt remove <pattern>` | Remove worktree(s) matching pattern (supports glob) |
 | `wt cleanup` | Remove all worktrees |
-| `wt config` | Show base branch config for current repo |
+| `wt config` | Show config for current repo |
 | `wt config base <branch>` | Set base branch for current repo |
 | `wt config base --global <branch>` | Set global default base branch |
+| `wt config on-create <cmd>` | Set on-create hook for current repo |
+| `wt config on-create --unset` | Remove on-create hook |
 | `wt config --list` | List all configuration |
 | `wt update` | Update wt to latest version |
 | `wt update --force` | Force update (reset to remote) |
@@ -130,6 +134,68 @@ Configuration is stored in `~/.config/wt/config` (follows XDG spec).
 2. Global default
 3. Hardcoded fallback (`origin/main`)
 
+#### Config file format
+
+The config file uses simple `key=value` pairs, one per line. You can edit it manually:
+
+```bash
+# View config file
+cat ~/.config/wt/config
+
+# Edit manually
+$EDITOR ~/.config/wt/config
+```
+
+**Format reference:**
+
+```ini
+# Global default base branch
+_default=origin/main
+
+# Per-repo base branch (key is the absolute repo path)
+/Users/you/projects/my-app=origin/develop
+/Users/you/projects/api=origin/main
+
+# Per-repo on-create hooks (key is repo path + ":on_create" suffix)
+/Users/you/projects/my-app:on_create=pnpm install
+/Users/you/projects/api:on_create=make deps
+```
+
+**Key patterns:**
+| Key | Description |
+|-----|-------------|
+| `_default` | Global default base branch |
+| `/path/to/repo` | Repo-specific base branch |
+| `/path/to/repo:on_create` | Repo-specific on-create hook |
+
+### Configure on-create hooks
+
+Run commands automatically when creating worktrees. Useful for installing dependencies:
+
+```bash
+# Set on-create hook for current repo
+wt config on-create 'pnpm install'
+
+# View current hook
+wt config on-create
+
+# Create without running hook
+wt create feature-branch --no-hooks
+
+# Unset hook
+wt config on-create --unset
+```
+
+Hooks run in the new worktree directory after creation. If a hook fails, a warning is displayed but the worktree remains usable.
+
+**Examples:**
+```bash
+wt config on-create 'npm install'           # Node.js project
+wt config on-create 'uv sync'               # Python UV project
+wt config on-create 'make install'          # Makefile-based project
+wt config on-create 'bundle install'        # Ruby project
+```
+
 ## How it works
 
 Worktrees are stored in `.worktrees/` inside your repo:
@@ -158,7 +224,7 @@ Both bash and zsh get tab completion:
 wt <TAB>           # Shows: create list open remove cleanup config update version
 wt open <TAB>      # Shows available worktrees
 wt remove <TAB>    # Shows available worktrees
-wt config <TAB>    # Shows: base --list
+wt config <TAB>    # Shows: base on-create --list
 ```
 
 ### How the -o flag works

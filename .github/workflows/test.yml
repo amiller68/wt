@@ -16,5 +16,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Configure git
+        run: |
+          git config --global user.email "test@example.com"
+          git config --global user.name "Test User"
+
       - name: Run tests
         run: ./test.sh

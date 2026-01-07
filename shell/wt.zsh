@@ -53,7 +53,7 @@ _wt_completion() {
 
     if (( CURRENT == 2 )); then
         _describe -t commands 'wt commands' commands
-        compadd -- '-o'
+        compadd -- '-o' '--no-hooks'
     elif (( CURRENT == 3 )); then
         case ${words[2]} in
             open|remove)
@@ -68,9 +68,9 @@ _wt_completion() {
                 compadd -- '--force'
                 ;;
             config)
-                compadd -- 'base' '--list'
+                compadd -- 'base' 'on-create' '--list'
                 ;;
-            -o)
+            -o|--no-hooks)
                 compadd -- 'create'
                 ;;
         esac
@@ -78,6 +78,9 @@ _wt_completion() {
         case ${words[3]} in
             base)
                 compadd -- '--global' '--unset'
+                ;;
+            on-create)
+                compadd -- '--unset'
                 ;;
         esac
     fi
