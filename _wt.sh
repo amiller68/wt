@@ -299,7 +299,13 @@ detect_repo
 
 case "$1" in
 create)
-    create_worktree "$2" "$3"
+    # Handle: wt create -o name OR wt -o create name
+    if [[ "$2" == "-o" ]]; then
+        OPEN_AFTER="true"
+        create_worktree "$3" "$4"
+    else
+        create_worktree "$2" "$3"
+    fi
     ;;
 list)
     list_worktrees "$2"
