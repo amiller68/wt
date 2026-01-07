@@ -27,7 +27,7 @@ print_usage() {
     echo ""
     echo "Commands:"
     echo "  create <name> [branch]  - Create a new worktree (branch defaults to new branch from origin/dev)"
-    echo "  list                    - List all worktrees"
+    echo "  list [--all]            - List worktrees (--all shows all git worktrees)"
     echo "  remove <name>           - Remove a worktree"
     echo "  open <name>             - cd to worktree directory"
     echo "  cleanup                 - Remove all worktrees"
@@ -35,9 +35,9 @@ print_usage() {
     echo "  version                 - Show version info"
     echo ""
     echo "Examples:"
-    echo "  wt create feature-branch"
+    echo "  wt create feature/auth/login"
     echo "  wt -o create feature-branch   # create and cd"
-    echo "  wt open feature-branch        # cd to existing"
+    echo "  wt open feature/auth/login    # cd to existing"
     echo "  wt list"
     echo "  wt update"
 }
@@ -57,6 +57,31 @@ ensure_worktrees_excluded() {
             echo ".worktrees" >> "$exclude_file"
         fi
     fi
+}
+
+# Get list of worktree names in .worktrees (handles nested paths like feature/auth/login)
+get_worktree_names() {
+    if [ ! -d "$WORKTREES_BASE_DIR" ]; then
+        return
+    fi
+    # Find directories containing .git file (actual worktrees)
+    find "$WORKTREES_BASE_DIR" -name ".git" -type f 2>/dev/null | while read -r gitfile; do
+        dirname "$gitfile" | sed "s|^$WORKTREES_BASE_DIR/||"
+    done
+}
+
+# Resolve worktree name to full path
+resolve_worktree_path() {
+    local name="$1"
+    local path="$WORKTREES_BASE_DIR/$name"
+
+    # Check if it exists in .worktrees
+    if [ -d "$path" ] && [ -f "$path/.git" ]; then
+        echo "$path"
+        return 0
+    fi
+
+    return 1
 }
 
 create_worktree() {
@@ -111,22 +136,24 @@ create_worktree() {
 }
 
 list_worktrees() {
-    echo -e "${BLUE}Git worktrees:${NC}"
-    cd "$REPO_DIR"
-    git worktree list
+    local show_all="$1"
 
-    echo ""
-    echo -e "${BLUE}Available worktree directories:${NC}"
-    if [ -d "$WORKTREES_BASE_DIR" ]; then
-        ls -la "$WORKTREES_BASE_DIR"
+    if [ "$show_all" = "--all" ]; then
+        echo -e "${BLUE}All git worktrees:${NC}"
+        cd "$REPO_DIR"
+        git worktree list
     else
-        echo "No worktrees directory found"
+        local worktrees=$(get_worktree_names)
+        if [ -z "$worktrees" ]; then
+            echo "No worktrees found in .worktrees/"
+        else
+            echo "$worktrees"
+        fi
     fi
 }
 
 remove_worktree() {
     local name="$1"
-    local worktree_path="$WORKTREES_BASE_DIR/$name"
 
     if [ -z "$name" ]; then
         echo -e "${RED}Error: Worktree name is required${NC}"
@@ -134,7 +161,8 @@ remove_worktree() {
         exit 1
     fi
 
-    if [ ! -d "$worktree_path" ]; then
+    local worktree_path=$(resolve_worktree_path "$name")
+    if [ -z "$worktree_path" ]; then
         echo -e "${RED}Error: Worktree '$name' does not exist${NC}"
         exit 1
     fi
@@ -149,7 +177,6 @@ remove_worktree() {
 
 open_worktree() {
     local name="$1"
-    local worktree_path="$WORKTREES_BASE_DIR/$name"
 
     if [ -z "$name" ]; then
         echo -e "${RED}Error: Worktree name is required${NC}" >&2
@@ -157,7 +184,8 @@ open_worktree() {
         exit 1
     fi
 
-    if [ ! -d "$worktree_path" ]; then
+    local worktree_path=$(resolve_worktree_path "$name")
+    if [ -z "$worktree_path" ]; then
         echo -e "${RED}Error: Worktree '$name' does not exist${NC}" >&2
         exit 1
     fi
@@ -270,7 +298,7 @@ create)
     create_worktree "$2" "$3"
     ;;
 list)
-    list_worktrees
+    list_worktrees "$2"
     ;;
 remove)
     remove_worktree "$2"

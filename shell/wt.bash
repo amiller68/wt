@@ -12,6 +12,15 @@ wt() {
     fi
 }
 
+# Get worktree names (handles nested paths like feature/auth/login)
+_wt_get_worktrees() {
+    local repo=$(git rev-parse --show-toplevel 2>/dev/null)
+    [[ -d "$repo/.worktrees" ]] || return
+    find "$repo/.worktrees" -name ".git" -type f 2>/dev/null | while read -r gitfile; do
+        dirname "$gitfile" | sed "s|^$repo/.worktrees/||"
+    done
+}
+
 # Completion
 _wt_complete() {
     local cur=${COMP_WORDS[COMP_CWORD]}
@@ -22,10 +31,11 @@ _wt_complete() {
     elif [[ $COMP_CWORD -eq 2 ]]; then
         case $prev in
             open|remove)
-                local repo=$(git rev-parse --show-toplevel 2>/dev/null)
-                if [[ -d "$repo/.worktrees" ]]; then
-                    COMPREPLY=($(compgen -W "$(ls "$repo/.worktrees" 2>/dev/null)" -- "$cur"))
-                fi
+                local worktrees=$(_wt_get_worktrees)
+                [[ -n "$worktrees" ]] && COMPREPLY=($(compgen -W "$worktrees" -- "$cur"))
+                ;;
+            list)
+                COMPREPLY=($(compgen -W "--all" -- "$cur"))
                 ;;
             update)
                 COMPREPLY=($(compgen -W "--force" -- "$cur"))

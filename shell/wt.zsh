@@ -12,12 +12,21 @@ wt() {
     fi
 }
 
+# Get worktree names (handles nested paths like feature/auth/login)
+_wt_get_worktrees() {
+    local repo=$(git rev-parse --show-toplevel 2>/dev/null)
+    [[ -d "$repo/.worktrees" ]] || return
+    find "$repo/.worktrees" -name ".git" -type f 2>/dev/null | while read -r gitfile; do
+        dirname "$gitfile" | sed "s|^$repo/.worktrees/||"
+    done
+}
+
 # Completion
 _wt_completion() {
     local -a commands
     commands=(
         'create:Create a new worktree'
-        'list:List all worktrees'
+        'list:List worktrees'
         'remove:Remove a worktree'
         'open:cd to worktree directory'
         'cleanup:Remove all worktrees'
@@ -31,12 +40,12 @@ _wt_completion() {
     elif (( CURRENT == 3 )); then
         case ${words[2]} in
             open|remove)
-                local repo=$(git rev-parse --show-toplevel 2>/dev/null)
-                if [[ -d "$repo/.worktrees" ]]; then
-                    local -a worktrees
-                    worktrees=($(ls "$repo/.worktrees" 2>/dev/null))
-                    _describe -t worktrees 'worktrees' worktrees
-                fi
+                local -a worktrees
+                worktrees=($(_wt_get_worktrees))
+                [[ ${#worktrees} -gt 0 ]] && _describe -t worktrees 'worktrees' worktrees
+                ;;
+            list)
+                compadd -- '--all'
                 ;;
             update)
                 compadd -- '--force'
