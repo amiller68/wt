@@ -60,6 +60,14 @@ if [[ -d "$TEST_DIR/.worktrees/exit-dirty-test" ]]; then
 fi
 assert_dir_not_exists "$TEST_DIR/.worktrees/exit-dirty-test" "exit --force removes dirty worktree"
 
+# Test: exit from nested worktree
+echo "--- Test: exit from nested worktree ---"
+_wt create feature/nested/test 2>/dev/null
+cd "$TEST_DIR/.worktrees/feature/nested/test"
+output=$(_wt exit 2>/dev/null)
+cd "$TEST_DIR"
+assert_dir_not_exists "$TEST_DIR/.worktrees/feature/nested/test" "exit removed nested worktree"
+
 # Test: full create, open, exit flow
 echo "--- Test: create, open, exit flow ---"
 _wt create flow-test 2>/dev/null

@@ -361,10 +361,16 @@ get_current_worktree() {
     # Check if we're under the .worktrees directory
     case "$current_dir" in
         "$WORKTREES_BASE_DIR"/*)
-            # Extract the worktree name (first path component after .worktrees/)
-            local relative="${current_dir#$WORKTREES_BASE_DIR/}"
-            echo "${relative%%/*}"
-            return 0
+            # Walk up to find the worktree root (has .git file)
+            local dir="$current_dir"
+            while [[ "$dir" == "$WORKTREES_BASE_DIR"/* ]]; do
+                if [[ -f "$dir/.git" ]]; then
+                    # Found the worktree root, extract relative path
+                    echo "${dir#$WORKTREES_BASE_DIR/}"
+                    return 0
+                fi
+                dir=$(dirname "$dir")
+            done
             ;;
     esac
 
