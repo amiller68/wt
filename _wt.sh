@@ -9,6 +9,12 @@ set -e
 # Install location (set by installer)
 INSTALL_DIR="${WORKTREE_INSTALL_DIR:-$HOME/.local/share/worktree}"
 
+# Source library files
+LIB_DIR="$INSTALL_DIR/lib"
+[ -f "$LIB_DIR/linear.sh" ] && source "$LIB_DIR/linear.sh"
+[ -f "$LIB_DIR/tmux.sh" ] && source "$LIB_DIR/tmux.sh"
+[ -f "$LIB_DIR/epic.sh" ] && source "$LIB_DIR/epic.sh"
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -130,6 +136,13 @@ health_check() {
     # Optional terminal tools
     check_dep "kitten" "optional, for Kitty tab support"
     check_dep "wezterm" "optional, for WezTerm tab support"
+
+    echo ""
+    echo -e "${BOLD}Epic dependencies (for wt epic):${NC}"
+    check_dep "tmux" "required, terminal multiplexer"
+    check_dep "jq" "required, JSON processor"
+    check_dep "claude" "required, Claude CLI with Linear MCP"
+    check_dep "gh" "optional, for PR creation"
 }
 
 print_usage() {
@@ -156,6 +169,12 @@ print_usage() {
     echo "  config on-create <cmd>  - Set on-create hook for current repo"
     echo "  config on-create --unset - Remove on-create hook"
     echo "  config --list           - List all configuration"
+    echo "  epic <issue-id>         - Spawn worktrees for Linear epic sub-tasks"
+    echo "  epic status <issue-id>  - Show status of epic tasks"
+    echo "  epic attach <issue-id>  - Attach to epic tmux session"
+    echo "  epic complete <task-id> - Mark task complete, merge, unlock dependents"
+    echo "  epic merge <issue-id>   - Create PR from integration branch"
+    echo "  epic cleanup <issue-id> - Remove epic worktrees and session"
     echo "  update [--force]        - Update wt to latest version"
     echo "  version                 - Show version info"
     echo "  which                   - Show path to wt script"
@@ -170,6 +189,12 @@ print_usage() {
     echo "  wt config on-create 'pnpm install'  # set hook"
     echo "  wt list"
     echo "  wt update"
+    echo ""
+    echo "Epic workflow (Linear integration):"
+    echo "  wt -o create epic-LIN-123     # create integration worktree"
+    echo "  wt epic LIN-123               # spawn task worktrees + tmux"
+    echo "  wt epic status LIN-123        # check progress"
+    echo "  wt epic complete LIN-456      # merge a completed task"
 }
 
 detect_repo() {
@@ -743,6 +768,481 @@ exit_worktree() {
     echo -e "${GREEN}Done!${NC}" >&2
 }
 
+# Check if we're in a worktree (not the root repo)
+is_in_worktree() {
+    local current_dir=$(pwd -P)
+    case "$current_dir" in
+        "$WORKTREES_BASE_DIR"/*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# Handle epic command and subcommands
+handle_epic() {
+    local subcommand="$1"
+    shift || true
+
+    # Check for required tools
+    if ! command -v jq &>/dev/null; then
+        echo -e "${RED}Error: jq is required for wt epic. Install it with your package manager.${NC}" >&2
+        exit 1
+    fi
+
+    check_tmux || exit 1
+
+    case "$subcommand" in
+        ""|"-h"|"--help")
+            echo "Usage: wt epic <issue-id> [options]"
+            echo "       wt epic <subcommand> <args>"
+            echo ""
+            echo "Subcommands:"
+            echo "  <issue-id>              - Spawn worktrees for Linear epic (must run from worktree)"
+            echo "  status <issue-id>       - Show status of epic tasks"
+            echo "  attach <issue-id>       - Attach to epic tmux session"
+            echo "  complete <task-id>      - Mark task complete, merge, unlock dependents"
+            echo "  merge <issue-id>        - Create PR from integration branch"
+            echo "  cleanup <issue-id>      - Remove epic worktrees and session"
+            echo ""
+            echo "Options:"
+            echo "  --dry-run               - Preview what would be created"
+            echo "  --workers N             - Limit concurrent sessions (default: 5)"
+            ;;
+        status)
+            epic_status "$@"
+            ;;
+        attach)
+            epic_attach "$@"
+            ;;
+        complete)
+            epic_complete "$@"
+            ;;
+        merge)
+            epic_merge "$@"
+            ;;
+        cleanup)
+            epic_cleanup "$@"
+            ;;
+        *)
+            # Treat as epic ID - spawn workflow
+            epic_spawn "$subcommand" "$@"
+            ;;
+    esac
+}
+
+# wt epic <issue-id> - main spawn workflow
+epic_spawn() {
+    local epic_id="$1"
+    shift || true
+
+    local dry_run=false
+    local max_workers=5
+
+    # Parse options
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --dry-run)
+                dry_run=true
+                shift
+                ;;
+            --workers)
+                max_workers="$2"
+                shift 2
+                ;;
+            *)
+                echo -e "${RED}Error: Unknown option '$1'${NC}" >&2
+                exit 1
+                ;;
+        esac
+    done
+
+    # Validate: must be in a worktree
+    if ! is_in_worktree; then
+        echo -e "${RED}Error: Must run 'wt epic' from within a worktree.${NC}" >&2
+        echo -e "${YELLOW}The current worktree becomes the integration branch for merges.${NC}" >&2
+        echo "" >&2
+        echo "First create an integration worktree:" >&2
+        echo "  wt -o create epic-${epic_id}" >&2
+        echo "" >&2
+        echo "Then from within that worktree:" >&2
+        echo "  wt epic ${epic_id}" >&2
+        exit 1
+    fi
+
+    # Check if epic already exists
+    if epic_state_exists "$epic_id"; then
+        echo -e "${YELLOW}Epic '$epic_id' already exists. Use 'wt epic status $epic_id' or 'wt epic cleanup $epic_id' first.${NC}" >&2
+        exit 1
+    fi
+
+    local integration_branch=$(git branch --show-current)
+    echo -e "${BLUE}Fetching epic data from Linear...${NC}" >&2
+
+    # Fetch epic data from Linear
+    local epic_data
+    epic_data=$(fetch_epic_data "$epic_id")
+    if [ $? -ne 0 ] || [ -z "$epic_data" ]; then
+        echo -e "${RED}Error: Failed to fetch epic data from Linear${NC}" >&2
+        exit 1
+    fi
+
+    local epic_title=$(echo "$epic_data" | jq -r '.epic.title')
+    local tasks=$(echo "$epic_data" | jq -r '.tasks')
+    local task_count=$(echo "$tasks" | jq 'length')
+
+    echo -e "${GREEN}Epic:${NC} $epic_title" >&2
+    echo -e "${BLUE}Found $task_count sub-tasks${NC}" >&2
+    echo "" >&2
+
+    if [ "$dry_run" = true ]; then
+        echo -e "${YELLOW}Dry run - would create:${NC}" >&2
+        echo "$tasks" | jq -r '.[] | "  - \(.identifier): \(.title)"' >&2
+        echo "" >&2
+        echo "Integration branch: $integration_branch" >&2
+        echo "tmux session: wt-epic-${epic_id}" >&2
+        exit 0
+    fi
+
+    # Build initial state for tasks
+    local tasks_state="[]"
+    for task in $(echo "$tasks" | jq -c '.[]'); do
+        local task_id=$(echo "$task" | jq -r '.id')
+        local identifier=$(echo "$task" | jq -r '.identifier')
+        local title=$(echo "$task" | jq -r '.title')
+        local blocked_by=$(echo "$task" | jq -r '.blockedBy // []')
+
+        local status="pending"
+        if [ "$(echo "$blocked_by" | jq 'length')" -gt 0 ]; then
+            status="blocked"
+        fi
+
+        tasks_state=$(echo "$tasks_state" | jq --arg id "$task_id" \
+            --arg identifier "$identifier" \
+            --arg title "$title" \
+            --arg status "$status" \
+            --argjson blockedBy "$blocked_by" \
+            --arg worktree ".worktrees/$identifier" \
+            '. + [{
+                issueId: $id,
+                identifier: $identifier,
+                title: $title,
+                status: $status,
+                blockedBy: $blockedBy,
+                worktree: $worktree,
+                paneId: null
+            }]')
+    done
+
+    # Create epic state
+    local state=$(create_epic_state "$epic_id" "$integration_branch" "$tasks_state")
+
+    # Create tmux session
+    local session_name=$(create_epic_session "$epic_id")
+    echo -e "${GREEN}Created tmux session:${NC} $session_name" >&2
+
+    # Create worktrees and spawn panes for unblocked tasks
+    local spawned=0
+    for task in $(echo "$tasks" | jq -c '.[]'); do
+        local identifier=$(echo "$task" | jq -r '.identifier')
+        local title=$(echo "$task" | jq -r '.title')
+        local blocked_by=$(echo "$task" | jq -r '.blockedBy // []')
+        local is_blocked=$(echo "$blocked_by" | jq 'length > 0')
+
+        # Create worktree (branch from integration branch)
+        local worktree_path="$WORKTREES_BASE_DIR/$identifier"
+
+        echo -e "${BLUE}Creating worktree for $identifier...${NC}" >&2
+
+        # Create worktree branching from current (integration) branch
+        if [ ! -d "$worktree_path" ]; then
+            git worktree add -b "$identifier" "$worktree_path" HEAD >&2 2>/dev/null || \
+                git worktree add "$worktree_path" "$identifier" >&2
+        fi
+
+        # Generate context file
+        local context_file=$(generate_task_context "$task" "$integration_branch" "$worktree_path")
+
+        if [ "$is_blocked" = "true" ]; then
+            # Create waiting pane for blocked tasks
+            local blocked_list=$(echo "$blocked_by" | jq -r 'join(", ")')
+            add_waiting_pane "$session_name" "$identifier" "$worktree_path" "$blocked_list" >/dev/null
+            update_task_status "$epic_id" "$identifier" "blocked"
+            echo -e "${YELLOW}  [$identifier] blocked by: $blocked_list${NC}" >&2
+        else
+            # Spawn active pane for unblocked tasks
+            if [ $spawned -lt $max_workers ]; then
+                local pane_id=$(add_task_pane "$session_name" "$identifier" "$worktree_path" "$context_file")
+                set_task_pane "$epic_id" "$identifier" "$pane_id"
+                update_task_status "$epic_id" "$identifier" "in_progress"
+                spawned=$((spawned + 1))
+                echo -e "${GREEN}  [$identifier] spawned${NC}" >&2
+            else
+                echo -e "${YELLOW}  [$identifier] queued (max workers reached)${NC}" >&2
+            fi
+        fi
+    done
+
+    echo "" >&2
+    echo -e "${GREEN}Epic spawned successfully!${NC}" >&2
+    echo -e "${BLUE}Attach to session:${NC} wt epic attach $epic_id" >&2
+    echo -e "${BLUE}Check status:${NC} wt epic status $epic_id" >&2
+}
+
+# wt epic status <issue-id>
+epic_status() {
+    local epic_id="$1"
+
+    if [ -z "$epic_id" ]; then
+        echo -e "${RED}Error: Epic ID required${NC}" >&2
+        echo "Usage: wt epic status <issue-id>" >&2
+        exit 1
+    fi
+
+    local state=$(load_epic_state "$epic_id")
+    if [ -z "$state" ]; then
+        echo -e "${RED}Error: No epic found with ID '$epic_id'${NC}" >&2
+        echo "Start an epic with: wt epic $epic_id" >&2
+        exit 1
+    fi
+
+    print_epic_status "$state"
+
+    # Check tmux session
+    local tmux_session=$(echo "$state" | jq -r '.tmuxSession')
+    if tmux has-session -t "$tmux_session" 2>/dev/null; then
+        echo ""
+        echo -e "${GREEN}tmux session active${NC}"
+        echo "Attach with: wt epic attach $epic_id"
+    else
+        echo ""
+        echo -e "${YELLOW}tmux session not running${NC}"
+    fi
+}
+
+# wt epic attach <issue-id>
+epic_attach() {
+    local epic_id="$1"
+
+    if [ -z "$epic_id" ]; then
+        echo -e "${RED}Error: Epic ID required${NC}" >&2
+        echo "Usage: wt epic attach <issue-id>" >&2
+        exit 1
+    fi
+
+    attach_epic_session "$epic_id"
+}
+
+# wt epic complete <task-id>
+epic_complete() {
+    local task_id="$1"
+
+    if [ -z "$task_id" ]; then
+        echo -e "${RED}Error: Task ID required${NC}" >&2
+        echo "Usage: wt epic complete <task-id>" >&2
+        exit 1
+    fi
+
+    # Find which epic this task belongs to
+    local epics_dir=$(get_epics_dir)
+    local epic_id=""
+    local state=""
+
+    if [ -d "$epics_dir" ]; then
+        for state_file in "$epics_dir"/*.json; do
+            [ -f "$state_file" ] || continue
+            local file_state=$(cat "$state_file")
+            local task=$(echo "$file_state" | jq -r --arg id "$task_id" '.tasks[] | select(.identifier == $id)')
+            if [ -n "$task" ] && [ "$task" != "null" ]; then
+                epic_id=$(echo "$file_state" | jq -r '.epicId')
+                state="$file_state"
+                break
+            fi
+        done
+    fi
+
+    if [ -z "$epic_id" ]; then
+        echo -e "${RED}Error: Task '$task_id' not found in any epic${NC}" >&2
+        exit 1
+    fi
+
+    local task=$(get_task_state "$state" "$task_id")
+    local worktree=$(echo "$task" | jq -r '.worktree')
+    local worktree_path="$REPO_DIR/$worktree"
+    local integration_branch=$(echo "$state" | jq -r '.integrationBranch')
+
+    # Check if task has commits
+    echo -e "${BLUE}Merging $task_id into $integration_branch...${NC}" >&2
+
+    # Get the integration worktree path
+    local integration_worktree=""
+    for wt in $(get_worktree_names); do
+        local wt_path="$WORKTREES_BASE_DIR/$wt"
+        local wt_branch=$(git -C "$wt_path" branch --show-current 2>/dev/null)
+        if [ "$wt_branch" = "$integration_branch" ]; then
+            integration_worktree="$wt_path"
+            break
+        fi
+    done
+
+    if [ -z "$integration_worktree" ]; then
+        echo -e "${RED}Error: Could not find integration worktree for branch '$integration_branch'${NC}" >&2
+        exit 1
+    fi
+
+    # Merge task branch into integration branch
+    cd "$integration_worktree"
+    if git merge --no-ff "$task_id" -m "Merge $task_id: $(echo "$task" | jq -r '.title')"; then
+        echo -e "${GREEN}Merged $task_id successfully${NC}" >&2
+        update_task_status "$epic_id" "$task_id" "completed"
+
+        # Update Linear status
+        update_linear_status "$task_id" "Done" 2>/dev/null || true
+
+        # Check for newly unblocked tasks
+        state=$(load_epic_state "$epic_id")
+        local unblocked=$(get_newly_unblocked_tasks "$state")
+        local unblocked_count=$(echo "$unblocked" | jq 'length')
+
+        if [ "$unblocked_count" -gt 0 ]; then
+            echo -e "${BLUE}Unlocking $unblocked_count dependent task(s)...${NC}" >&2
+
+            local session_name="wt-epic-${epic_id}"
+            for task in $(echo "$unblocked" | jq -c '.[]'); do
+                local dep_id=$(echo "$task" | jq -r '.identifier')
+                local dep_worktree="$WORKTREES_BASE_DIR/$dep_id"
+                local context_file="$dep_worktree/.claude-context"
+
+                update_task_status "$epic_id" "$dep_id" "in_progress"
+                activate_task_pane "$session_name" "$dep_id" "$context_file"
+                echo -e "${GREEN}  Activated: $dep_id${NC}" >&2
+            done
+        fi
+    else
+        echo -e "${RED}Merge failed. Resolve conflicts and try again.${NC}" >&2
+        exit 1
+    fi
+}
+
+# wt epic merge <issue-id>
+epic_merge() {
+    local epic_id="$1"
+
+    if [ -z "$epic_id" ]; then
+        echo -e "${RED}Error: Epic ID required${NC}" >&2
+        echo "Usage: wt epic merge <issue-id>" >&2
+        exit 1
+    fi
+
+    local state=$(load_epic_state "$epic_id")
+    if [ -z "$state" ]; then
+        echo -e "${RED}Error: No epic found with ID '$epic_id'${NC}" >&2
+        exit 1
+    fi
+
+    local integration_branch=$(echo "$state" | jq -r '.integrationBranch')
+    local incomplete=$(get_tasks_by_status "$state" "in_progress")
+    local incomplete_count=$(echo "$incomplete" | jq 'length')
+
+    if [ "$incomplete_count" -gt 0 ]; then
+        echo -e "${YELLOW}Warning: $incomplete_count task(s) still in progress${NC}" >&2
+        echo "$incomplete" | jq -r '.[] | "  - \(.identifier): \(.title)"' >&2
+        echo "" >&2
+    fi
+
+    # Find integration worktree
+    local integration_worktree=""
+    for wt in $(get_worktree_names); do
+        local wt_path="$WORKTREES_BASE_DIR/$wt"
+        local wt_branch=$(git -C "$wt_path" branch --show-current 2>/dev/null)
+        if [ "$wt_branch" = "$integration_branch" ]; then
+            integration_worktree="$wt_path"
+            break
+        fi
+    done
+
+    if [ -z "$integration_worktree" ]; then
+        echo -e "${RED}Error: Could not find integration worktree${NC}" >&2
+        exit 1
+    fi
+
+    cd "$integration_worktree"
+
+    # Push branch and create PR using gh
+    echo -e "${BLUE}Pushing $integration_branch...${NC}" >&2
+    git push -u origin "$integration_branch" >&2
+
+    local base_branch=$(get_base_branch)
+    local epic_title=$(echo "$state" | jq -r '.epicId')
+
+    echo -e "${BLUE}Creating PR...${NC}" >&2
+
+    # Get completed task list for PR body
+    local completed=$(get_tasks_by_status "$state" "completed")
+    local task_list=$(echo "$completed" | jq -r '.[] | "- [x] \(.identifier): \(.title)"')
+
+    gh pr create \
+        --base "${base_branch#origin/}" \
+        --head "$integration_branch" \
+        --title "Epic: $epic_id" \
+        --body "## Tasks
+
+$task_list
+
+---
+Created with \`wt epic\`"
+
+    echo -e "${GREEN}PR created!${NC}" >&2
+}
+
+# wt epic cleanup <issue-id>
+epic_cleanup() {
+    local epic_id="$1"
+    local force=""
+
+    shift || true
+    [ "$1" = "--force" ] || [ "$1" = "-f" ] && force="--force"
+
+    if [ -z "$epic_id" ]; then
+        echo -e "${RED}Error: Epic ID required${NC}" >&2
+        echo "Usage: wt epic cleanup <issue-id> [--force]" >&2
+        exit 1
+    fi
+
+    local state=$(load_epic_state "$epic_id")
+    if [ -z "$state" ]; then
+        echo -e "${RED}Error: No epic found with ID '$epic_id'${NC}" >&2
+        exit 1
+    fi
+
+    echo -e "${YELLOW}Cleaning up epic '$epic_id'...${NC}" >&2
+
+    # Kill tmux session
+    kill_epic_session "$epic_id"
+
+    # Remove task worktrees
+    local tasks=$(echo "$state" | jq -c '.tasks[]')
+    while IFS= read -r task; do
+        local identifier=$(echo "$task" | jq -r '.identifier')
+        local worktree_path="$WORKTREES_BASE_DIR/$identifier"
+
+        if [ -d "$worktree_path" ]; then
+            # Check for uncommitted changes
+            if is_worktree_dirty "$worktree_path" && [ -z "$force" ]; then
+                echo -e "${YELLOW}  Skipping $identifier (has uncommitted changes, use --force)${NC}" >&2
+                continue
+            fi
+
+            echo -e "${BLUE}  Removing worktree: $identifier${NC}" >&2
+            git worktree remove $force "$worktree_path" 2>/dev/null || \
+                echo -e "${YELLOW}  Failed to remove $identifier${NC}" >&2
+        fi
+    done <<< "$tasks"
+
+    # Delete state file
+    delete_epic_state "$epic_id"
+
+    echo -e "${GREEN}Epic cleanup complete${NC}" >&2
+}
+
 get_version() {
     local manifest="$INSTALL_DIR/manifest.toml"
     if [ -f "$manifest" ]; then
@@ -876,6 +1376,10 @@ exit)
 config)
     shift  # remove 'config'
     handle_config "$@"
+    ;;
+epic)
+    shift  # remove 'epic'
+    handle_epic "$@"
     ;;
 *)
     print_usage

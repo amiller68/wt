@@ -13,6 +13,7 @@ Git worktree manager for running parallel Claude Code sessions.
 - **Shell integration** - Tab completion for commands and worktree names
 - **Nested paths** - Supports branch names like `feature/auth/login`
 - **Self-updating** - Run `wt update` to get the latest version
+- **Linear Epic integration** - Spawn parallel Claude sessions for Linear epic sub-tasks
 
 ## Install
 
@@ -45,6 +46,12 @@ source ~/.zshrc  # or ~/.bashrc
 | `wt config on-create <cmd>` | Set on-create hook for current repo |
 | `wt config on-create --unset` | Remove on-create hook |
 | `wt config --list` | List all configuration |
+| `wt epic <issue-id>` | Spawn worktrees for Linear epic sub-tasks |
+| `wt epic status <issue-id>` | Show status of epic tasks |
+| `wt epic attach <issue-id>` | Attach to epic tmux session |
+| `wt epic complete <task-id>` | Mark task complete, merge, unlock dependents |
+| `wt epic merge <issue-id>` | Create PR from integration branch |
+| `wt epic cleanup <issue-id>` | Remove epic worktrees and session |
 | `wt update` | Update wt to latest version |
 | `wt update --force` | Force update (reset to remote) |
 | `wt version` | Show version |
@@ -223,6 +230,66 @@ wt config on-create 'make install'          # Makefile-based project
 wt config on-create 'bundle install'        # Ruby project
 ```
 
+### Linear Epic orchestration
+
+Spawn multiple parallel Claude Code sessions from a Linear epic with sub-tasks. Each sub-task gets its own worktree and tmux pane.
+
+**Requirements:**
+- `tmux` - Terminal multiplexer for managing sessions
+- `jq` - JSON processor
+- `claude` CLI with Linear MCP configured
+
+**Workflow:**
+
+```bash
+# 1. Create an integration worktree
+wt -o create epic-LIN-123
+
+# 2. From within the worktree, spawn the epic
+wt epic LIN-123
+
+# 3. Attach to the tmux session
+wt epic attach LIN-123
+
+# 4. Work on tasks in separate panes, then mark complete
+wt epic complete LIN-456
+
+# 5. When all tasks are done, create the PR
+wt epic merge LIN-123
+
+# 6. Clean up
+wt epic cleanup LIN-123
+```
+
+**How it works:**
+
+1. **Fetches epic data** from Linear via the Linear MCP, including sub-issues and their blocking relations
+2. **Creates worktrees** for each sub-task as siblings to the integration worktree
+3. **Spawns a tmux session** with one pane per task
+4. **Tracks dependencies** - blocked tasks wait until their blockers complete
+5. **Merges completed tasks** into the integration branch
+6. **Unlocks dependent tasks** automatically when blockers complete
+
+**Dependency handling:**
+
+If your Linear epic has blocking relations (task A blocks task B), the epic command respects them:
+- Unblocked tasks spawn immediately with active Claude sessions
+- Blocked tasks get "waiting" panes that activate when their blockers complete
+
+**Context injection:**
+
+Each Claude session receives a `.claude-context` file with:
+- The Linear issue title and description
+- Dependency information
+- Instructions for completing the task
+
+**Options:**
+
+```bash
+wt epic LIN-123 --dry-run      # Preview what would be created
+wt epic LIN-123 --workers 3    # Limit to 3 concurrent sessions
+```
+
 ## How it works
 
 Worktrees are stored in `.worktrees/` inside your repo:
@@ -313,6 +380,12 @@ rm ~/.local/bin/_wt
 
 - Git
 - Bash or Zsh
+
+**For `wt epic` (optional):**
+- `tmux` - Terminal multiplexer
+- `jq` - JSON processor
+- `claude` CLI with Linear MCP configured
+- `gh` CLI (for PR creation)
 
 ## License
 
