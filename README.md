@@ -33,10 +33,12 @@ source ~/.zshrc  # or ~/.bashrc
 | `wt create <name> -o` | Create and cd into the worktree |
 | `wt create <name> --no-hooks` | Create without running on-create hook |
 | `wt open <name>` | cd into an existing worktree |
+| `wt open --all` | Open all worktrees in new terminal tabs |
 | `wt list` | List worktrees in `.worktrees/` |
 | `wt list --all` | List all git worktrees |
 | `wt remove <pattern>` | Remove worktree(s) matching pattern (supports glob) |
 | `wt exit [--force]` | Exit current worktree (removes it, returns to base) |
+| `wt health` | Show terminal detection and dependency status |
 | `wt config` | Show config for current repo |
 | `wt config base <branch>` | Set base branch for current repo |
 | `wt config base --global <branch>` | Set global default base branch |
@@ -81,6 +83,31 @@ claude
 ```
 
 Both instances work independently with their own branches.
+
+### Open all worktrees in tabs
+
+Quickly open every worktree in new terminal tabs:
+
+```bash
+wt open --all
+```
+
+This detects your terminal emulator and opens each worktree in a new tab. Check compatibility with:
+
+```bash
+wt health
+```
+
+**Supported terminals:**
+
+| Terminal | Method | Notes |
+|----------|--------|-------|
+| iTerm2 | AppleScript | Full support |
+| Terminal.app | AppleScript | Full support |
+| Ghostty | `open -a` | Opens at directory |
+| Kitty | `kitten @` | Requires `allow_remote_control yes` in kitty.conf |
+| WezTerm | `wezterm cli` | Full support |
+| Alacritty | New window | No native tabs (opens windows instead) |
 
 ### Use an existing branch
 
