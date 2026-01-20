@@ -32,14 +32,19 @@ fetch_epic_data() {
   ]
 }"
 
-    # Run claude with print mode to get just the output
+    # Run claude with print mode
+    # Note: stderr is shown so user can see/approve Linear MCP tool permissions
+    echo -e "${YELLOW}  Running claude to fetch Linear data (you may need to approve tool use)...${NC}" >&2
     local result
-    result=$(claude --print --max-turns 5 "$prompt" 2>/dev/null)
+    result=$(claude --print --max-turns 5 "$prompt")
+    local exit_code=$?
 
-    if [ $? -ne 0 ] || [ -z "$result" ]; then
-        echo -e "${RED}Error: Failed to fetch data from Linear${NC}" >&2
+    if [ $exit_code -ne 0 ] || [ -z "$result" ]; then
+        echo -e "${RED}Error: Failed to fetch data from Linear (exit code: $exit_code)${NC}" >&2
         return 1
     fi
+
+    echo -e "${GREEN}  Linear data fetched successfully${NC}" >&2
 
     # Extract JSON from the response (claude may include surrounding text)
     # Look for the JSON object between { and }
@@ -101,7 +106,8 @@ update_linear_status() {
 
     local prompt="Use the Linear MCP to update issue $issue_id and set its state to \"$status\". Confirm with a simple 'done' message."
 
-    claude --print --max-turns 3 "$prompt" >/dev/null 2>&1
+    echo -e "${BLUE}  Updating Linear status for $issue_id...${NC}" >&2
+    claude --print --max-turns 3 "$prompt" >/dev/null 2>&1 || true
 }
 
 # Create a comment on a Linear issue
