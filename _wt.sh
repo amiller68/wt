@@ -14,7 +14,123 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
+BOLD='\033[1m'
 NC='\033[0m' # No Color
+
+# Detect current terminal emulator
+detect_terminal() {
+    case "$TERM_PROGRAM" in
+        ghostty)        echo "ghostty" ;;
+        iTerm.app)      echo "iterm2" ;;
+        Apple_Terminal) echo "terminal.app" ;;
+        WezTerm)        echo "wezterm" ;;
+        Alacritty)      echo "alacritty" ;;
+        *)
+            if [ -n "$KITTY_WINDOW_ID" ]; then
+                echo "kitty"
+            elif [ -n "$WEZTERM_UNIX_SOCKET" ]; then
+                echo "wezterm"
+            else
+                echo "unknown"
+            fi
+            ;;
+    esac
+}
+
+# Open a new terminal tab at the specified directory
+open_terminal_tab() {
+    local dir="$1"
+    local terminal=$(detect_terminal)
+
+    case "$terminal" in
+        iterm2)
+            osascript -e "tell application \"iTerm2\"
+                tell current window
+                    create tab with default profile
+                    tell current session
+                        write text \"cd '$dir' && exec \$SHELL\"
+                    end tell
+                end tell
+            end tell" >/dev/null 2>&1
+            ;;
+        terminal.app)
+            osascript -e "tell application \"Terminal\"
+                activate
+                tell application \"System Events\" to keystroke \"t\" using {command down}
+                delay 0.2
+                do script \"cd '$dir'\" in front window
+            end tell" >/dev/null 2>&1
+            ;;
+        ghostty)
+            # Ghostty on macOS: open -a opens a new tab when Ghostty is already running
+            open -a Ghostty "$dir"
+            ;;
+        kitty)
+            kitten @ launch --type=tab --cwd="$dir" 2>/dev/null || {
+                echo -e "${YELLOW}Warning: Kitty remote control not enabled. Add 'allow_remote_control yes' to kitty.conf${NC}" >&2
+                return 1
+            }
+            ;;
+        wezterm)
+            wezterm cli spawn --cwd "$dir" 2>/dev/null || {
+                echo -e "${YELLOW}Warning: WezTerm CLI spawn failed${NC}" >&2
+                return 1
+            }
+            ;;
+        alacritty)
+            # Alacritty has no tabs - open new window instead
+            alacritty msg create-window --working-directory "$dir" 2>/dev/null || \
+            alacritty --working-directory "$dir" &
+            ;;
+        *)
+            echo -e "${YELLOW}Warning: Terminal '$terminal' not supported for tab opening${NC}" >&2
+            echo -e "${YELLOW}Worktree path: $dir${NC}" >&2
+            return 1
+            ;;
+    esac
+}
+
+# Check if a dependency is available
+check_dep() {
+    local cmd="$1"
+    local note="$2"
+    if command -v "$cmd" &>/dev/null; then
+        printf "  %-14s ${GREEN}ok${NC}\n" "$cmd"
+    else
+        printf "  %-14s ${YELLOW}not found${NC} (%s)\n" "$cmd" "$note"
+    fi
+}
+
+# Display health check and terminal detection info
+health_check() {
+    local terminal=$(detect_terminal)
+    echo -e "${BOLD}Terminal:${NC} $terminal"
+
+    # Tab support info
+    case "$terminal" in
+        iterm2|terminal.app) echo -e "${BOLD}Tab support:${NC} yes (AppleScript)" ;;
+        ghostty)             echo -e "${BOLD}Tab support:${NC} yes (open -a)" ;;
+        kitty)               echo -e "${BOLD}Tab support:${NC} yes (kitten @)" ;;
+        wezterm)             echo -e "${BOLD}Tab support:${NC} yes (wezterm cli)" ;;
+        alacritty)           echo -e "${BOLD}Tab support:${NC} no (opens windows instead)" ;;
+        *)                   echo -e "${BOLD}Tab support:${NC} unknown" ;;
+    esac
+
+    echo ""
+    echo -e "${BOLD}Dependencies:${NC}"
+
+    # Required
+    check_dep "git" "required"
+
+    # Platform-specific
+    if [[ "$OSTYPE" == darwin* ]]; then
+        check_dep "osascript" "required for iTerm2/Terminal.app"
+    fi
+
+    # Optional terminal tools
+    check_dep "kitten" "optional, for Kitty tab support"
+    check_dep "wezterm" "optional, for WezTerm tab support"
+}
 
 print_usage() {
     echo "Usage: wt [-o] [--no-hooks] <command> [worktree-name] [branch-name]"
@@ -31,7 +147,9 @@ print_usage() {
     echo "  list [--all]            - List worktrees (--all shows all git worktrees)"
     echo "  remove <name>           - Remove a worktree"
     echo "  open <name>             - cd to worktree directory"
+    echo "  open --all              - Open all worktrees in new terminal tabs"
     echo "  exit [--force]          - Exit current worktree (removes it, returns to base)"
+    echo "  health                  - Show terminal detection and dependency status"
     echo "  config                  - Show config for current repo"
     echo "  config base <branch>    - Set base branch for current repo"
     echo "  config base --global <branch> - Set global default base branch"
@@ -47,6 +165,7 @@ print_usage() {
     echo "  wt -o create feature-branch   # create and cd"
     echo "  wt create name --no-hooks     # skip hook"
     echo "  wt open feature/auth/login    # cd to existing"
+    echo "  wt open --all                 # open all in tabs"
     echo "  wt config base origin/main    # set base branch"
     echo "  wt config on-create 'pnpm install'  # set hook"
     echo "  wt list"
@@ -547,7 +666,36 @@ remove_worktree() {
 
 open_worktree() {
     local name="$1"
+    local open_all=false
 
+    # Check for --all flag
+    if [ "$name" = "--all" ]; then
+        open_all=true
+    fi
+
+    if $open_all; then
+        local worktrees=$(get_worktree_names)
+        if [ -z "$worktrees" ]; then
+            echo -e "${YELLOW}No worktrees found${NC}" >&2
+            exit 0
+        fi
+
+        local count=0
+        while IFS= read -r wt_name; do
+            local wt_path=$(resolve_worktree_path "$wt_name")
+            if [ -n "$wt_path" ]; then
+                if open_terminal_tab "$wt_path"; then
+                    echo -e "${GREEN}Opened: $wt_name${NC}" >&2
+                    ((count++))
+                fi
+            fi
+        done <<< "$worktrees"
+
+        echo -e "${GREEN}Opened $count worktree(s) in new tabs${NC}" >&2
+        return 0
+    fi
+
+    # Original single-worktree logic
     if [ -z "$name" ]; then
         echo -e "${RED}Error: Worktree name is required${NC}" >&2
         print_usage >&2
@@ -675,6 +823,10 @@ version)
 which)
     # Show path to this script
     echo "$0"
+    exit 0
+    ;;
+health)
+    health_check
     exit 0
     ;;
 esac

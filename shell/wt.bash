@@ -6,7 +6,10 @@
 
 wt() {
     # Eval output if command might cd (open, exit, or create with -o flag)
-    if [[ "$1" == "open" || "$1" == "exit" || "$1" == "-o" || "$2" == "-o" || "$*" == *"-o"* ]]; then
+    # Don't eval when using --all flag (tabs are opened directly)
+    if [[ "$1" == "open" && "$2" == "--all" ]]; then
+        _wt "$@"
+    elif [[ "$1" == "open" || "$1" == "exit" || "$1" == "-o" || "$2" == "-o" || "$*" == *"-o"* ]]; then
         eval "$(_wt "$@")"
     else
         _wt "$@"
@@ -41,10 +44,15 @@ _wt_complete() {
     local prev=${COMP_WORDS[COMP_CWORD-1]}
 
     if [[ $COMP_CWORD -eq 1 ]]; then
-        COMPREPLY=($(compgen -W "create list remove open exit config update version which -o --no-hooks" -- "$cur"))
+        COMPREPLY=($(compgen -W "create list remove open exit health config update version which -o --no-hooks" -- "$cur"))
     elif [[ $COMP_CWORD -eq 2 ]]; then
         case $prev in
-            open|remove)
+            open)
+                local worktrees=$(_wt_get_worktrees)
+                [[ -n "$worktrees" ]] && COMPREPLY=($(compgen -W "--all $worktrees" -- "$cur"))
+                [[ -z "$worktrees" ]] && COMPREPLY=($(compgen -W "--all" -- "$cur"))
+                ;;
+            remove)
                 local worktrees=$(_wt_get_worktrees)
                 [[ -n "$worktrees" ]] && COMPREPLY=($(compgen -W "$worktrees" -- "$cur"))
                 ;;

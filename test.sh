@@ -74,6 +74,7 @@ source "$SCRIPT_DIR/tests/test_nested.sh"
 source "$SCRIPT_DIR/tests/test_config.sh"
 source "$SCRIPT_DIR/tests/test_exit.sh"
 source "$SCRIPT_DIR/tests/test_hooks.sh"
+source "$SCRIPT_DIR/tests/test_open_all.sh"
 
 # Cleanup
 echo ""

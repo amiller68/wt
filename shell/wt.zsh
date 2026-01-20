@@ -6,7 +6,10 @@
 
 wt() {
     # Eval output if command might cd (open, exit, or create with -o flag)
-    if [[ "$1" == "open" || "$1" == "exit" || "$1" == "-o" || "$2" == "-o" || "$*" == *"-o"* ]]; then
+    # Don't eval when using --all flag (tabs are opened directly)
+    if [[ "$1" == "open" && "$2" == "--all" ]]; then
+        _wt "$@"
+    elif [[ "$1" == "open" || "$1" == "exit" || "$1" == "-o" || "$2" == "-o" || "$*" == *"-o"* ]]; then
         eval "$(_wt "$@")"
     else
         _wt "$@"
@@ -43,8 +46,9 @@ _wt_completion() {
         'create:Create a new worktree'
         'list:List worktrees'
         'remove:Remove a worktree'
-        'open:cd to worktree directory'
+        'open:cd to worktree directory (--all opens in tabs)'
         'exit:Exit current worktree (removes it)'
+        'health:Show terminal detection and dependency status'
         'config:Configure base branch settings'
         'update:Update wt to latest version'
         'version:Show version info'
@@ -56,7 +60,13 @@ _wt_completion() {
         compadd -- '-o' '--no-hooks'
     elif (( CURRENT == 3 )); then
         case ${words[2]} in
-            open|remove)
+            open)
+                local -a worktrees
+                worktrees=($(_wt_get_worktrees))
+                compadd -- '--all'
+                [[ ${#worktrees} -gt 0 ]] && _describe -t worktrees 'worktrees' worktrees
+                ;;
+            remove)
                 local -a worktrees
                 worktrees=($(_wt_get_worktrees))
                 [[ ${#worktrees} -gt 0 ]] && _describe -t worktrees 'worktrees' worktrees
