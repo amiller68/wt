@@ -53,13 +53,15 @@ handle_setup() {
     echo ""
     echo -e "${GREEN}Initialization complete!${NC}" >&2
     echo -e "${BLUE}Created:${NC}" >&2
-    echo -e "  wt.toml           - Spawn configuration" >&2
-    echo -e "  agents/INDEX.md   - Agent context template" >&2
-    echo -e "  .claude/          - Claude Code settings" >&2
+    echo -e "  wt.toml                  - Spawn configuration" >&2
+    echo -e "  agents/INDEX.md          - Instructions for spawned workers" >&2
+    echo -e "  agents/ORCHESTRATION.md  - Guide for parent orchestration" >&2
+    echo -e "  .claude/                 - Claude Code settings" >&2
+    echo -e "  CLAUDE.md                - References agents/" >&2
     echo ""
     echo -e "${YELLOW}Next steps:${NC}" >&2
-    echo -e "  1. Edit agents/INDEX.md with project-specific instructions" >&2
-    echo -e "  2. Add more context files to agents/ as needed" >&2
+    echo -e "  1. Edit agents/INDEX.md with project-specific worker instructions" >&2
+    echo -e "  2. Review agents/ORCHESTRATION.md for orchestration guide" >&2
     echo -e "  3. Run: wt spawn <task> --context \"...\" --auto" >&2
 }
 
@@ -112,20 +114,20 @@ EOF
     echo -e "${GREEN}Created wt.toml${NC}" >&2
 }
 
-# Create agents directory with INDEX.md template
+# Create agents directory with INDEX.md and ORCHESTRATION.md
 init_agents_dir() {
     local force="$1"
     local agents_dir="$REPO_DIR/agents"
     local index_file="$agents_dir/INDEX.md"
+    local orch_file="$agents_dir/ORCHESTRATION.md"
 
     mkdir -p "$agents_dir"
 
+    # Create INDEX.md (instructions for spawned workers)
     if [ -f "$index_file" ] && [ "$force" != true ]; then
         echo -e "${YELLOW}agents/INDEX.md already exists (skipping)${NC}" >&2
-        return 0
-    fi
-
-    cat > "$index_file" << 'EOF'
+    else
+        cat > "$index_file" << 'EOF'
 # Agent Instructions
 
 You are an autonomous coding agent working on a focused task.
@@ -152,10 +154,72 @@ You are an autonomous coding agent working on a focused task.
 Your work will be reviewed and merged by the parent session.
 Ensure all tests pass before finishing.
 EOF
+        echo -e "${GREEN}Created agents/INDEX.md${NC}" >&2
+    fi
 
-    echo -e "${GREEN}Created agents/INDEX.md${NC}" >&2
+    # Create ORCHESTRATION.md (instructions for parent orchestrator)
+    if [ -f "$orch_file" ] && [ "$force" != true ]; then
+        echo -e "${YELLOW}agents/ORCHESTRATION.md already exists (skipping)${NC}" >&2
+    else
+        cat > "$orch_file" << 'EOF'
+# Multi-Agent Orchestration
 
-    # Add .gitignore note
+Use `wt` to spawn parallel Claude Code workers for large tasks.
+
+## Commands
+
+```bash
+wt spawn <name> --context "..." --auto  # Spawn autonomous worker
+wt ps                                    # Check worker status
+wt attach [name]                         # Watch workers in tmux
+wt review <name>                         # Review worker's changes
+wt merge <name>                          # Merge into current branch
+wt kill <name>                           # Stop a worker
+wt remove <name>                         # Delete worktree
+```
+
+## Workflow
+
+1. **Create integration branch**: `wt -o create epic-<id>`
+2. **Decompose** the work into independent, parallelizable tasks
+3. **Spawn workers** with specific context for each task
+4. **Monitor**: `wt ps` to check status
+5. **Review & merge** as workers complete
+6. **Clean up**: `wt remove <id>`
+
+## Writing Spawn Context
+
+Each spawn should have focused, specific context:
+
+```bash
+wt spawn TASK-123 --context "Implement user authentication.
+
+Files to modify:
+- src/auth/login.ts
+- src/middleware/auth.ts
+
+Requirements:
+- Add JWT token generation
+- Add auth middleware
+- Add login endpoint
+
+Acceptance criteria:
+- All tests pass
+- Login flow works end-to-end" --auto
+```
+
+## Tips
+
+- Keep tasks independent when possible
+- Include specific file paths if known
+- Set clear acceptance criteria
+- Spawn 2-4 workers at a time, merge as they complete
+- Use `wt attach` to monitor progress
+EOF
+        echo -e "${GREEN}Created agents/ORCHESTRATION.md${NC}" >&2
+    fi
+
+    # Update .gitignore
     local gitignore="$REPO_DIR/.gitignore"
     if [ -f "$gitignore" ]; then
         if ! grep -q "^# wt spawn files$" "$gitignore" 2>/dev/null; then
@@ -167,6 +231,40 @@ EOF
 EOF
             echo -e "${GREEN}Updated .gitignore${NC}" >&2
         fi
+    fi
+
+    # Update CLAUDE.md to reference agents/
+    update_claude_md
+}
+
+# Add reference to agents/ in CLAUDE.md
+update_claude_md() {
+    local claude_md="$REPO_DIR/CLAUDE.md"
+    local marker="# Agent Context"
+
+    # Check if already has reference
+    if [ -f "$claude_md" ] && grep -q "$marker" "$claude_md" 2>/dev/null; then
+        return 0
+    fi
+
+    local agents_ref="
+$marker
+
+For multi-agent orchestration, see \`agents/ORCHESTRATION.md\`.
+Spawned workers receive instructions from \`agents/INDEX.md\`.
+"
+
+    if [ -f "$claude_md" ]; then
+        # Append to existing CLAUDE.md
+        echo "$agents_ref" >> "$claude_md"
+        echo -e "${GREEN}Updated CLAUDE.md with agents reference${NC}" >&2
+    else
+        # Create minimal CLAUDE.md
+        cat > "$claude_md" << EOF
+# Project Guide
+$agents_ref
+EOF
+        echo -e "${GREEN}Created CLAUDE.md${NC}" >&2
     fi
 }
 
