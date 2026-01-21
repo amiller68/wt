@@ -76,7 +76,7 @@ source "$SCRIPT_DIR/tests/test_config.sh"
 source "$SCRIPT_DIR/tests/test_exit.sh"
 source "$SCRIPT_DIR/tests/test_hooks.sh"
 source "$SCRIPT_DIR/tests/test_open_all.sh"
-source "$SCRIPT_DIR/tests/test_epic.sh"
+source "$SCRIPT_DIR/tests/test_spawn.sh"
 
 # Cleanup
 echo ""

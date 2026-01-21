@@ -13,7 +13,7 @@ Git worktree manager for running parallel Claude Code sessions.
 - **Shell integration** - Tab completion for commands and worktree names
 - **Nested paths** - Supports branch names like `feature/auth/login`
 - **Self-updating** - Run `wt update` to get the latest version
-- **Linear Epic integration** - Spawn parallel Claude sessions for Linear epic sub-tasks
+- **Multi-agent workflow** - Spawn parallel Claude Code sessions with tmux integration
 
 ## Install
 
@@ -46,12 +46,16 @@ source ~/.zshrc  # or ~/.bashrc
 | `wt config on-create <cmd>` | Set on-create hook for current repo |
 | `wt config on-create --unset` | Remove on-create hook |
 | `wt config --list` | List all configuration |
-| `wt epic <issue-id>` | Spawn worktrees for Linear epic sub-tasks |
-| `wt epic status <issue-id>` | Show status of epic tasks |
-| `wt epic attach <issue-id>` | Attach to epic tmux session |
-| `wt epic complete <task-id>` | Mark task complete, merge, unlock dependents |
-| `wt epic merge <issue-id>` | Create PR from integration branch |
-| `wt epic cleanup <issue-id>` | Remove epic worktrees and session |
+| `wt spawn <name> [options]` | Create worktree + launch Claude in tmux |
+| `wt spawn --context <text>` | Provide task context for Claude |
+| `wt spawn --auto` | Auto-start Claude with full prompt |
+| `wt spawn --no-agents` | Skip loading agents context |
+| `wt ps` | Show status of spawned sessions |
+| `wt attach [name]` | Attach to tmux session (optionally to specific window) |
+| `wt review <name>` | Show diff for parent review |
+| `wt merge <name>` | Merge reviewed worktree into current branch |
+| `wt kill <name>` | Kill a running tmux window |
+| `wt init [--force]` | Initialize wt.toml, agents/, and .claude/ |
 | `wt update` | Update wt to latest version |
 | `wt update --force` | Force update (reset to remote) |
 | `wt version` | Show version |
@@ -230,65 +234,140 @@ wt config on-create 'make install'          # Makefile-based project
 wt config on-create 'bundle install'        # Ruby project
 ```
 
-### Linear Epic orchestration
+### Multi-agent workflow (spawn)
 
-Spawn multiple parallel Claude Code sessions from a Linear epic with sub-tasks. Each sub-task gets its own worktree and tmux pane.
+Spawn multiple parallel Claude Code sessions, each working in its own worktree. A parent Claude Code session orchestrates the work while child sessions run in tmux.
 
 **Requirements:**
 - `tmux` - Terminal multiplexer for managing sessions
 - `jq` - JSON processor
-- `claude` CLI with Linear MCP configured
+- `claude` CLI
 
 **Workflow:**
 
 ```bash
 # 1. Create an integration worktree
-wt -o create epic-LIN-123
+wt -o create epic-AUT-4475
 
-# 2. From within the worktree, spawn the epic
-wt epic LIN-123
+# 2. Spawn parallel workers with context
+wt spawn AUT-4478 --context "Implement the Thread Source Model..."
+wt spawn AUT-4480 --context "Add threadTs to SlackClient..."
+wt spawn AUT-4481 --context "Add SLACK_SIGNING_SECRET env var..."
 
-# 3. Attach to the tmux session
-wt epic attach LIN-123
+# 3. Check status
+wt ps
 
-# 4. Work on tasks in separate panes, then mark complete
-wt epic complete LIN-456
+# 4. Attach to watch workers
+wt attach               # Attach to tmux session
+wt attach AUT-4478      # Attach and switch to specific window
 
-# 5. When all tasks are done, create the PR
-wt epic merge LIN-123
+# 5. Review completed work
+wt review AUT-4481
 
-# 6. Clean up
-wt epic cleanup LIN-123
+# 6. Merge into current branch
+wt merge AUT-4481
+
+# 7. Clean up (optional)
+wt remove AUT-4481
 ```
 
 **How it works:**
 
-1. **Fetches epic data** from Linear via the Linear MCP, including sub-issues and their blocking relations
-2. **Creates worktrees** for each sub-task as siblings to the integration worktree
-3. **Spawns a tmux session** with one pane per task
-4. **Tracks dependencies** - blocked tasks wait until their blockers complete
-5. **Merges completed tasks** into the integration branch
-6. **Unlocks dependent tasks** automatically when blockers complete
-
-**Dependency handling:**
-
-If your Linear epic has blocking relations (task A blocks task B), the epic command respects them:
-- Unblocked tasks spawn immediately with active Claude sessions
-- Blocked tasks get "waiting" panes that activate when their blockers complete
+1. **`wt spawn`** creates a worktree branching from your current branch and launches Claude in a tmux window
+2. **`wt ps`** shows status of all spawned sessions (running, exited, commits, dirty state)
+3. **`wt attach`** attaches to the tmux session so you can monitor workers
+4. **`wt review`** shows what changed in a worktree for the parent to review
+5. **`wt merge`** merges the reviewed work into the current branch
+6. **`wt kill`** stops a running Claude session
 
 **Context injection:**
 
-Each Claude session receives a `.claude-context` file with:
-- The Linear issue title and description
-- Dependency information
-- Instructions for completing the task
+When using `--context`, the text is written to `.claude-task` in the worktree. Configure your CLAUDE.md to read this file:
 
-**Options:**
+```markdown
+# In CLAUDE.md
+If a `.claude-task` file exists, read it for task context.
+```
+
+**tmux session:**
+
+All spawned workers share a single tmux session (`wt-spawned`), with each worker in its own window. This makes it easy to:
+- See all workers at once with `wt attach`
+- Switch between windows with tmux shortcuts
+- Monitor progress without leaving your terminal
+
+**Parent orchestration:**
+
+The parent Claude Code session (where you run `wt spawn`) has full control:
+- Fetch task details via Linear MCP or other sources
+- Decompose work into parallel tasks
+- Review child work before merging
+- Track everything in the conversation history
+
+### Auto mode
+
+Auto mode starts Claude immediately with a full prompt, skipping all permission prompts:
 
 ```bash
-wt epic LIN-123 --dry-run      # Preview what would be created
-wt epic LIN-123 --workers 3    # Limit to 3 concurrent sessions
+wt spawn AUT-4478 --context "Implement the webhook handler" --auto
 ```
+
+This uses `claude --dangerously-skip-permissions` for true autonomous operation.
+
+**Agent context loading:**
+
+When using `--auto`, wt can load additional context from an `./agents/` directory:
+
+```
+./agents/
+├── INDEX.md          # Required - entry point
+├── CONCEPTS.md       # Optional domain context
+├── ARCHITECTURE.md   # Optional technical context
+└── ...
+```
+
+The prompt is built by concatenating:
+1. All markdown files from `./agents/` (INDEX.md first, then alphabetically)
+2. The `--context` value from the spawn command
+
+Use `--no-agents` to skip loading agent context.
+
+### wt.toml configuration
+
+Repos can include a `wt.toml` file for spawn configuration:
+
+```toml
+[agents]
+dir = "./agents"  # Custom agents directory (default: ./agents)
+
+[spawn]
+auto = true       # Always use auto mode (default: false)
+
+[setup]
+# Bash commands to allow during wt setup
+allow = ["pnpm *", "make *", "git *"]
+deny = ["rm -rf *", "sudo *"]
+```
+
+### Init command
+
+Initialize wt for a repo with one command:
+
+```bash
+wt init              # Create wt.toml, agents/, and .claude/
+wt init --force      # Overwrite existing files
+```
+
+This creates:
+- `wt.toml` - Spawn configuration with sensible defaults
+- `agents/INDEX.md` - Agent context template
+- `.claude/settings.json` - Claude permissions from wt.toml
+- `.claude/commands/` - Default slash commands
+
+**Default commands shipped with wt:**
+- `check.md` - Run project checks (make check, npm test, cargo test)
+- `review.md` - Review staged changes before commit
+- `draft.md` - Draft commit message for staged changes
 
 ## How it works
 
@@ -381,10 +460,10 @@ rm ~/.local/bin/_wt
 - Git
 - Bash or Zsh
 
-**For `wt epic` (optional):**
+**For `wt spawn` (optional):**
 - `tmux` - Terminal multiplexer
 - `jq` - JSON processor
-- `claude` CLI with Linear MCP configured
+- `claude` CLI
 - `gh` CLI (for PR creation)
 
 ## License
