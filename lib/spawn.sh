@@ -159,6 +159,7 @@ has_agents_index() {
 
 # Load all agents context markdown files
 # Returns concatenated content from INDEX.md first, then other .md files
+# Excludes ORCHESTRATION.md (that's for the parent, not workers)
 load_agents_context() {
     local repo_root="${1:-$REPO_DIR}"
     local agents_dir
@@ -177,11 +178,12 @@ load_agents_context() {
     fi
 
     # Read other markdown files (sorted alphabetically)
+    # Skip ORCHESTRATION.md - that's for the parent orchestrator
     for file in "$agents_dir"/*.md; do
         [ -f "$file" ] || continue
         local basename
         basename=$(basename "$file")
-        if [ "$basename" != "INDEX.md" ]; then
+        if [ "$basename" != "INDEX.md" ] && [ "$basename" != "ORCHESTRATION.md" ]; then
             local name="${basename%.md}"
             context+="## $name\n\n"
             context+="$(cat "$file")\n\n"
