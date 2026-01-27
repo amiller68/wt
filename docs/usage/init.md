@@ -80,6 +80,50 @@ After verifying the result, remove the backup:
 rm -rf .wt-backup/
 ```
 
+## Iterating After Init
+
+`wt init` (even with `--audit`) is a first pass. The generated docs and commands are a starting point — you should iterate on them to match how your team actually works.
+
+The fastest way to iterate is to work with Claude directly:
+
+```bash
+claude
+# "Read docs/index.md and improve it — we use pnpm, not npm, and our
+#  tests require a running postgres container via docker compose up -d"
+```
+
+Or edit the files by hand. Either way, the goal is to capture the knowledge that makes agents effective in your repo.
+
+### What to add to `docs/`
+
+Beyond `index.md`, consider adding articles for things agents get wrong without guidance:
+
+- **Code patterns** — error handling conventions, naming rules, how you structure modules, preferred libraries over alternatives
+- **Development workflows** — how to set up a local environment, how to run specific subsystems, database migrations, seed data
+- **PR success criteria** — what must pass before merge (CI checks, review requirements, changelog updates, version bumps)
+- **Architecture decisions** — why the codebase is structured this way, what not to refactor, boundaries between subsystems
+
+Reference these from `CLAUDE.md` so agents discover them:
+
+```markdown
+## Documentation
+
+Project documentation lives in `docs/`:
+- `docs/index.md` — Agent instructions
+- `docs/patterns.md` — Code patterns and conventions
+- `docs/workflows.md` — Development workflows
+- `docs/pr-criteria.md` — PR success criteria
+```
+
+### What to tune in `.claude/commands/`
+
+The default commands are generic. After audit tailors them to your toolchain, you might still want to:
+
+- Add project-specific steps to `/check` (e.g., `docker compose up -d` before tests)
+- Add PR description templates to `/draft`
+- Add project-specific review criteria to `/review` (e.g., "check that all API changes have OpenAPI spec updates")
+- Create entirely new commands for your workflow (e.g., `/migrate`, `/deploy-staging`, `/release`)
+
 ## What Each File Does
 
 ### `CLAUDE.md`

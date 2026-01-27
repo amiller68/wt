@@ -23,16 +23,30 @@ Project documentation lives in `docs/`:
 
 ## Testing
 
+- **Directory:** `tests/`
 - **Run all:** `./test.sh`
-- **Structure:** `tests/test_*.sh` modules, `assert_*` helpers in test.sh
+- **Structure:**
+  - `tests/test_*.sh` - Individual test modules
+  - `assert_*` helper functions in test.sh
+  - Tests run in isolated temp directories
 - **Adding tests:** Create new test module or add to existing one
+
+## Key Files
+
+- `_wt.sh` - Main implementation
+- `manifest.toml` - Version
+- `test.sh` - Test runner
+- `tests/` - Test modules
+- `shell/wt.bash` - Bash integration
+- `shell/wt.zsh` - Zsh integration
 
 ## Documentation Updates
 
-Update `README.md` when:
-- New commands/flags added
-- Behavior changed
-- New configuration options
+- **Main docs:** `README.md`
+- **Update when:**
+  - New commands/flags added
+  - Behavior changed
+  - New configuration options
 
 ## Issues
 
