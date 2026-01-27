@@ -49,13 +49,12 @@ source ~/.zshrc  # or ~/.bashrc
 | `wt spawn <name> [options]` | Create worktree + launch Claude in tmux |
 | `wt spawn --context <text>` | Provide task context for Claude |
 | `wt spawn --auto` | Auto-start Claude with full prompt |
-| `wt spawn --no-agents` | Skip loading agents context |
 | `wt ps` | Show status of spawned sessions |
 | `wt attach [name]` | Attach to tmux session (optionally to specific window) |
 | `wt review <name>` | Show diff for parent review |
 | `wt merge <name>` | Merge reviewed worktree into current branch |
 | `wt kill <name>` | Kill a running tmux window |
-| `wt init [--force]` | Initialize wt.toml, agents/, and .claude/ |
+| `wt init [--force] [--audit]` | Initialize wt.toml, docs/, issues/, and .claude/ |
 | `wt update` | Update wt to latest version |
 | `wt update --force` | Force update (reset to remote) |
 | `wt version` | Show version |
@@ -243,33 +242,26 @@ Spawn multiple parallel Claude Code sessions, each working in its own worktree. 
 - `jq` - JSON processor
 - `claude` CLI
 
-**Workflow:**
+**Recommended flow:**
+
+The orchestrating agent uses `/issues` to discover work, then `/spawn` to delegate tasks to parallel workers:
 
 ```bash
-# 1. Create an integration worktree
-wt -o create epic-AUT-4475
+# 1. Create an integration worktree for the epic
+wt -o create epic-123
 
-# 2. Spawn parallel workers with context
-wt spawn AUT-4478 --context "Implement the Thread Source Model..."
-wt spawn AUT-4480 --context "Add threadTs to SlackClient..."
-wt spawn AUT-4481 --context "Add SLACK_SIGNING_SECRET env var..."
+# 2. Start Claude — it uses /issues to discover work
+#    and /spawn to delegate tasks to parallel workers
+claude
 
-# 3. Check status
-wt ps
-
-# 4. Attach to watch workers
-wt attach               # Attach to tmux session
-wt attach AUT-4478      # Attach and switch to specific window
-
-# 5. Review completed work
-wt review AUT-4481
-
-# 6. Merge into current branch
-wt merge AUT-4481
-
-# 7. Clean up (optional)
-wt remove AUT-4481
+# 3. Monitor and manage workers
+wt ps                        # check worker status
+wt attach                    # watch workers in tmux
+wt review <task>             # review completed work
+wt merge <task>              # merge into epic branch
 ```
+
+See [docs/usage/orchestration.md](docs/usage/orchestration.md) for the full orchestration guide.
 
 **How it works:**
 
@@ -280,29 +272,12 @@ wt remove AUT-4481
 5. **`wt merge`** merges the reviewed work into the current branch
 6. **`wt kill`** stops a running Claude session
 
-**Context injection:**
-
-When using `--context`, the text is written to `.claude-task` in the worktree. Configure your CLAUDE.md to read this file:
-
-```markdown
-# In CLAUDE.md
-If a `.claude-task` file exists, read it for task context.
-```
-
 **tmux session:**
 
 All spawned workers share a single tmux session (`wt-spawned`), with each worker in its own window. This makes it easy to:
 - See all workers at once with `wt attach`
 - Switch between windows with tmux shortcuts
 - Monitor progress without leaving your terminal
-
-**Parent orchestration:**
-
-The parent Claude Code session (where you run `wt spawn`) has full control:
-- Fetch task details via Linear MCP or other sources
-- Decompose work into parallel tasks
-- Review child work before merging
-- Track everything in the conversation history
 
 ### Auto mode
 
@@ -314,32 +289,13 @@ wt spawn AUT-4478 --context "Implement the webhook handler" --auto
 
 This uses `claude --dangerously-skip-permissions` for true autonomous operation.
 
-**Agent context loading:**
-
-When using `--auto`, wt can load additional context from an `./agents/` directory:
-
-```
-./agents/
-├── INDEX.md          # Required - entry point
-├── CONCEPTS.md       # Optional domain context
-├── ARCHITECTURE.md   # Optional technical context
-└── ...
-```
-
-The prompt is built by concatenating:
-1. All markdown files from `./agents/` (INDEX.md first, then alphabetically)
-2. The `--context` value from the spawn command
-
-Use `--no-agents` to skip loading agent context.
+In auto mode, the `--context` value is passed directly as the prompt to Claude.
 
 ### wt.toml configuration
 
 Repos can include a `wt.toml` file for spawn configuration:
 
 ```toml
-[agents]
-dir = "./agents"  # Custom agents directory (default: ./agents)
-
 [spawn]
 auto = true       # Always use auto mode (default: false)
 
@@ -354,13 +310,16 @@ deny = ["rm -rf *", "sudo *"]
 Initialize wt for a repo with one command:
 
 ```bash
-wt init              # Create wt.toml, agents/, and .claude/
+wt init              # Create wt.toml, docs/, issues/, .claude/, CLAUDE.md
 wt init --force      # Overwrite existing files
+wt init --audit      # Init + launch Claude to populate docs/ with project-specific content
 ```
 
 This creates:
 - `wt.toml` - Spawn configuration with sensible defaults
-- `agents/INDEX.md` - Agent context template
+- `docs/` - Agent instructions and project documentation
+- `issues/` - File-based issue tracking directory
+- `CLAUDE.md` - Project guide pointing to docs/
 - `.claude/settings.json` - Claude permissions from wt.toml
 - `.claude/commands/` - Default slash commands
 
@@ -368,6 +327,21 @@ This creates:
 - `check.md` - Run project checks (make check, npm test, cargo test)
 - `review.md` - Review staged changes before commit
 - `draft.md` - Draft commit message for staged changes
+- `spawn.md` - Orchestrate parallel Claude workers
+- `issues.md` - Manage file-based issue tracking
+
+### Issue tracking
+
+Track work items as markdown files in `issues/`:
+
+```
+issues/
+├── auth-feature.md         # Epic
+├── auth-01-jwt-tokens.md   # Ticket
+├── auth-02-middleware.md    # Ticket
+```
+
+See `docs/issue-tracking.md` (created by `wt init`) for the full convention.
 
 ## How it works
 

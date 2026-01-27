@@ -1,11 +1,12 @@
 #!/bin/bash
 
 # Init/Setup command implementation for wt
-# Initializes wt.toml, agents directory, and Claude Code settings
+# Initializes wt.toml, docs/, issues/, .claude/, and CLAUDE.md
 
 # Handle init/setup command
 handle_setup() {
     local force=false
+    local audit=false
 
     # Parse options
     while [ $# -gt 0 ]; do
@@ -14,9 +15,13 @@ handle_setup() {
                 force=true
                 shift
                 ;;
+            --audit)
+                audit=true
+                shift
+                ;;
             *)
                 echo -e "${RED}Error: Unknown option '$1'${NC}" >&2
-                echo "Usage: wt init [--force]" >&2
+                echo "Usage: wt init [--force] [--audit]" >&2
                 exit 1
                 ;;
         esac
@@ -28,15 +33,41 @@ handle_setup() {
         exit 1
     fi
 
+    # Check if we're in a git repo; offer to create one if not
+    if ! git rev-parse --show-toplevel &>/dev/null; then
+        echo -e "${YELLOW}No git repository found in current directory.${NC}" >&2
+        read -p "Run 'git init'? [y/N] " -r reply </dev/tty
+        if [[ "$reply" =~ ^[Yy]$ ]]; then
+            git init
+            echo "" >&2
+        else
+            echo -e "${RED}Aborted. Run 'git init' first.${NC}" >&2
+            exit 1
+        fi
+    fi
+
+    # Now detect repo (sets REPO_DIR, WORKTREES_BASE_DIR)
+    detect_repo
+
+    # Check if already initialized (wt.toml exists)
+    if [ -f "$REPO_DIR/wt.toml" ] && [ "$force" != true ]; then
+        echo -e "${RED}Error: Already initialized. Use --force to reinitialize.${NC}" >&2
+        exit 1
+    fi
+
     echo -e "${BLUE}Initializing wt for this repository...${NC}" >&2
 
-    # 1. Create wt.toml if it doesn't exist
+    # 1. Create wt.toml
     init_wt_toml "$force"
 
-    # 2. Create agents directory with INDEX.md
-    init_agents_dir "$force"
+    # 2. Copy docs from templates
+    init_docs_dir "$force"
 
-    # 3. Set up Claude Code configuration
+    # 3. Create issues directory
+    mkdir -p "$REPO_DIR/issues"
+    echo -e "${GREEN}Created issues/${NC}" >&2
+
+    # 4. Set up Claude Code configuration
     local claude_dir="$REPO_DIR/.claude"
     local settings_file="$claude_dir/settings.json"
     local commands_dir="$claude_dir/commands"
@@ -50,24 +81,57 @@ handle_setup() {
     # Copy command files
     setup_commands "$commands_dir" "$force"
 
+    # 5. Copy CLAUDE.md template
+    init_claude_md "$force"
+
     echo ""
     echo -e "${GREEN}Initialization complete!${NC}" >&2
     echo -e "${BLUE}Created:${NC}" >&2
     echo -e "  wt.toml                  - Spawn configuration" >&2
-    echo -e "  agents/INDEX.md          - Instructions for spawned workers" >&2
-    echo -e "  agents/ORCHESTRATION.md  - Guide for parent orchestration" >&2
-    echo -e "  .claude/                 - Claude Code settings" >&2
-    echo -e "  CLAUDE.md                - References agents/" >&2
-    echo ""
-    echo -e "${YELLOW}Next steps:${NC}" >&2
-    echo -e "  1. Edit agents/INDEX.md with project-specific worker instructions" >&2
-    echo -e "  2. Review agents/ORCHESTRATION.md for orchestration guide" >&2
-    echo -e "  3. Run: wt spawn <task> --context \"...\" --auto" >&2
+    echo -e "  docs/                    - Agent and project documentation" >&2
+    echo -e "  issues/                  - File-based issue tracking" >&2
+    echo -e "  .claude/                 - Claude Code settings and commands" >&2
+    echo -e "  CLAUDE.md                - Project guide for Claude" >&2
+    if [ "$audit" = true ]; then
+        run_audit
+    else
+        echo ""
+        echo -e "${YELLOW}Next steps:${NC}" >&2
+        echo -e "  1. Edit docs/index.md with project-specific worker instructions" >&2
+        echo -e "  2. Run: wt spawn <task> --context \"...\" --auto" >&2
+    fi
 }
 
 # Alias for backwards compatibility
 handle_init() {
     handle_setup "$@"
+}
+
+# Run Claude Code audit to populate docs/ with project-specific content
+run_audit() {
+    if ! command -v claude &>/dev/null; then
+        echo -e "${RED}Error: claude CLI is required for --audit. Install it first.${NC}" >&2
+        exit 1
+    fi
+
+    echo "" >&2
+    echo -e "${BLUE}Running audit: launching Claude to explore and document this codebase...${NC}" >&2
+
+    local audit_prompt
+    audit_prompt='Explore this codebase and populate the project documentation.
+
+1. Read CLAUDE.md and docs/ to understand the current doc structure
+2. Explore the codebase: key files, directory structure, languages, frameworks, build system, test setup
+3. Update docs/index.md with project-specific instructions for AI coding agents:
+   - Project overview and purpose
+   - Key files and directories
+   - How to build, test, and run
+   - Code conventions and patterns to follow
+   - Common gotchas or important context
+4. Do NOT modify docs/issue-tracking.md (this is a generic guide)
+5. Commit your changes with a clear message'
+
+    (cd "$REPO_DIR" && claude -p "$audit_prompt")
 }
 
 # Create wt.toml with sensible defaults
@@ -87,10 +151,6 @@ init_wt_toml() {
 [spawn]
 # Always use auto mode (--auto flag)
 auto = true
-
-[agents]
-# Directory containing agent context files
-dir = "./agents"
 
 [setup]
 # Bash commands to allow without prompting
@@ -114,110 +174,35 @@ EOF
     echo -e "${GREEN}Created wt.toml${NC}" >&2
 }
 
-# Create agents directory with INDEX.md and ORCHESTRATION.md
-init_agents_dir() {
+# Copy docs template files from wt install dir to repo docs/
+init_docs_dir() {
     local force="$1"
-    local agents_dir="$REPO_DIR/agents"
-    local index_file="$agents_dir/INDEX.md"
-    local orch_file="$agents_dir/ORCHESTRATION.md"
+    local docs_dir="$REPO_DIR/docs"
+    local wt_docs_dir="$INSTALL_DIR/templates/docs"
 
-    mkdir -p "$agents_dir"
+    mkdir -p "$docs_dir"
 
-    # Create INDEX.md (instructions for spawned workers)
-    if [ -f "$index_file" ] && [ "$force" != true ]; then
-        echo -e "${YELLOW}agents/INDEX.md already exists (skipping)${NC}" >&2
-    else
-        cat > "$index_file" << 'EOF'
-# Agent Instructions
-
-You are an autonomous coding agent working on a focused task.
-
-## Workflow
-
-1. **Understand** - Read the task description carefully
-2. **Explore** - Search the codebase to understand context and patterns
-3. **Plan** - Break down the work into small steps
-4. **Implement** - Make changes following existing conventions
-5. **Test** - Run tests to verify your changes work
-6. **Commit** - Commit with a clear, descriptive message
-
-## Guidelines
-
-- Follow existing code patterns and conventions
-- Make atomic commits (one logical change per commit)
-- Add tests for new functionality
-- Update documentation if behavior changes
-- If blocked, commit what you have and note the blocker
-
-## When Complete
-
-Your work will be reviewed and merged by the parent session.
-Ensure all tests pass before finishing.
-EOF
-        echo -e "${GREEN}Created agents/INDEX.md${NC}" >&2
+    if [ ! -d "$wt_docs_dir" ]; then
+        echo -e "${YELLOW}No templates/docs directory found in wt installation${NC}" >&2
+        return 0
     fi
 
-    # Create ORCHESTRATION.md (instructions for parent orchestrator)
-    if [ -f "$orch_file" ] && [ "$force" != true ]; then
-        echo -e "${YELLOW}agents/ORCHESTRATION.md already exists (skipping)${NC}" >&2
-    else
-        cat > "$orch_file" << 'EOF'
-# Multi-Agent Orchestration
+    # Copy each template file
+    for src_file in "$wt_docs_dir"/*.md; do
+        [ -f "$src_file" ] || continue
 
-Use `wt` to spawn parallel Claude Code workers for large tasks.
+        local basename
+        basename=$(basename "$src_file")
+        local target="$docs_dir/$basename"
 
-## Commands
+        if [ -f "$target" ] && [ "$force" != true ]; then
+            echo -e "${YELLOW}docs/$basename already exists (skipping)${NC}" >&2
+            continue
+        fi
 
-```bash
-wt spawn <name> --context "..." --auto  # Spawn autonomous worker
-wt ps                                    # Check worker status
-wt attach [name]                         # Watch workers in tmux
-wt review <name>                         # Review worker's changes
-wt merge <name>                          # Merge into current branch
-wt kill <name>                           # Stop a worker
-wt remove <name>                         # Delete worktree
-```
-
-## Workflow
-
-1. **Create integration branch**: `wt -o create epic-<id>`
-2. **Decompose** the work into independent, parallelizable tasks
-3. **Spawn workers** with specific context for each task
-4. **Monitor**: `wt ps` to check status
-5. **Review & merge** as workers complete
-6. **Clean up**: `wt remove <id>`
-
-## Writing Spawn Context
-
-Each spawn should have focused, specific context:
-
-```bash
-wt spawn TASK-123 --context "Implement user authentication.
-
-Files to modify:
-- src/auth/login.ts
-- src/middleware/auth.ts
-
-Requirements:
-- Add JWT token generation
-- Add auth middleware
-- Add login endpoint
-
-Acceptance criteria:
-- All tests pass
-- Login flow works end-to-end" --auto
-```
-
-## Tips
-
-- Keep tasks independent when possible
-- Include specific file paths if known
-- Set clear acceptance criteria
-- Spawn 2-4 workers at a time, merge as they complete
-- Use `wt attach` to monitor progress
-EOF
-        echo -e "${GREEN}Created agents/ORCHESTRATION.md${NC}" >&2
-    fi
+        cp "$src_file" "$target"
+        echo -e "${GREEN}Created docs/$basename${NC}" >&2
+    done
 
     # Update .gitignore
     local gitignore="$REPO_DIR/.gitignore"
@@ -232,39 +217,24 @@ EOF
             echo -e "${GREEN}Updated .gitignore${NC}" >&2
         fi
     fi
-
-    # Update CLAUDE.md to reference agents/
-    update_claude_md
 }
 
-# Add reference to agents/ in CLAUDE.md
-update_claude_md() {
+# Copy CLAUDE.md template to repo root
+init_claude_md() {
+    local force="$1"
     local claude_md="$REPO_DIR/CLAUDE.md"
-    local marker="# Agent Context"
+    local template="$INSTALL_DIR/templates/CLAUDE.md"
 
-    # Check if already has reference
-    if [ -f "$claude_md" ] && grep -q "$marker" "$claude_md" 2>/dev/null; then
+    if [ -f "$claude_md" ] && [ "$force" != true ]; then
+        echo -e "${YELLOW}CLAUDE.md already exists (skipping)${NC}" >&2
         return 0
     fi
 
-    local agents_ref="
-$marker
-
-For multi-agent orchestration, see \`agents/ORCHESTRATION.md\`.
-Spawned workers receive instructions from \`agents/INDEX.md\`.
-"
-
-    if [ -f "$claude_md" ]; then
-        # Append to existing CLAUDE.md
-        echo "$agents_ref" >> "$claude_md"
-        echo -e "${GREEN}Updated CLAUDE.md with agents reference${NC}" >&2
-    else
-        # Create minimal CLAUDE.md
-        cat > "$claude_md" << EOF
-# Project Guide
-$agents_ref
-EOF
+    if [ -f "$template" ]; then
+        cp "$template" "$claude_md"
         echo -e "${GREEN}Created CLAUDE.md${NC}" >&2
+    else
+        echo -e "${YELLOW}No CLAUDE.md template found in wt installation${NC}" >&2
     fi
 }
 
@@ -335,7 +305,7 @@ setup_commands() {
     local commands_dir="$1"
     local force="$2"
 
-    local wt_commands_dir="$INSTALL_DIR/commands"
+    local wt_commands_dir="$INSTALL_DIR/templates/commands"
 
     if [ ! -d "$wt_commands_dir" ]; then
         echo -e "${YELLOW}No commands directory found in wt installation${NC}" >&2
