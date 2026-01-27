@@ -43,16 +43,20 @@ Verify they are clear, descriptive, and follow the project's conventions.
 Review the diff for:
 - **Correctness**: Does the logic do what the commit messages claim?
 - **Code quality**: Follows existing patterns and conventions?
+  - Functions named `snake_case`, handlers named `handle_<command>()`
+  - Errors to stderr with color codes, stdout reserved for eval-able output
+  - Variables quoted, conditionals use `[[ ... ]]`
 - **Error handling**: Appropriate for the context?
 - **Security**: No credentials, injection risks, or unsafe operations?
-- **Tests**: Are changes covered by tests? Are new tests needed?
-- **Dead code**: Any leftover debug code, commented-out blocks, or unused imports?
+- **Tests**: Are changes covered by tests in `tests/test_*.sh`? Are new tests needed?
+- **Dead code**: Any leftover debug code, commented-out blocks, or unused variables?
+- **Versioning**: Does this change warrant a version bump in `manifest.toml`?
 
 ### 5. Documentation Check
 
-- Do changes require README or docs updates?
+- Do changes require `README.md` updates (new commands, flags, changed behavior)?
 - Are new functions/commands documented?
-- Do existing docs need corrections?
+- Do `docs/index.md` or `CLAUDE.md` need corrections?
 
 ### 6. Issue Cross-Reference
 

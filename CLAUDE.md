@@ -1,14 +1,15 @@
-# Development Guide
+# Project Guide
 
 Guide for AI agents and developers working on this Git worktree manager.
 
 ## Project Overview
 
-`wt` is a CLI tool for managing git worktrees, designed for parallel Claude Code sessions.
+`wt` is a bash CLI tool for managing git worktrees, designed for parallel Claude Code sessions.
 
 ## Documentation
 
-- `docs/index.md` — Agent instructions and key files reference
+Project documentation lives in `docs/`:
+- `docs/index.md` — Agent instructions for spawned workers
 - `docs/issue-tracking.md` — File-based issue tracking convention
 
 ## Versioning
