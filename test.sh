@@ -11,6 +11,7 @@ FAIL=0
 # Use local version - add script dir to PATH and source local shell config
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 export PATH="$SCRIPT_DIR:$PATH"
+export WORKTREE_INSTALL_DIR="$SCRIPT_DIR"
 ln -sf "$SCRIPT_DIR/_wt.sh" "$SCRIPT_DIR/_wt"
 source "$SCRIPT_DIR/shell/wt.bash"
 
@@ -75,6 +76,7 @@ source "$SCRIPT_DIR/tests/test_config.sh"
 source "$SCRIPT_DIR/tests/test_exit.sh"
 source "$SCRIPT_DIR/tests/test_hooks.sh"
 source "$SCRIPT_DIR/tests/test_open_all.sh"
+source "$SCRIPT_DIR/tests/test_spawn.sh"
 
 # Cleanup
 echo ""

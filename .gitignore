@@ -1,2 +1,6 @@
 # Symlink created by test.sh
 _wt
+
+# wt spawn files
+.claude-task
+.claude-spawn-prompt

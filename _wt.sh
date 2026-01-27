@@ -9,6 +9,13 @@ set -e
 # Install location (set by installer)
 INSTALL_DIR="${WORKTREE_INSTALL_DIR:-$HOME/.local/share/worktree}"
 
+# Source library files
+LIB_DIR="$INSTALL_DIR/lib"
+[ -f "$LIB_DIR/config.sh" ] && source "$LIB_DIR/config.sh"
+[ -f "$LIB_DIR/tmux.sh" ] && source "$LIB_DIR/tmux.sh"
+[ -f "$LIB_DIR/spawn.sh" ] && source "$LIB_DIR/spawn.sh"
+[ -f "$LIB_DIR/init.sh" ] && source "$LIB_DIR/init.sh"
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -130,10 +137,17 @@ health_check() {
     # Optional terminal tools
     check_dep "kitten" "optional, for Kitty tab support"
     check_dep "wezterm" "optional, for WezTerm tab support"
+
+    echo ""
+    echo -e "${BOLD}Spawn dependencies (for wt spawn):${NC}"
+    check_dep "tmux" "required, terminal multiplexer"
+    check_dep "jq" "required, JSON processor"
+    check_dep "claude" "required, Claude CLI"
+    check_dep "gh" "optional, for PR creation"
 }
 
 print_usage() {
-    echo "Usage: wt [-o] [--no-hooks] <command> [worktree-name] [branch-name]"
+    echo "Usage: wt [-o] [--no-hooks] <command> [args...]"
     echo ""
     echo "Manages git worktrees within the current repository's .worktrees/ directory."
     echo "Run this command from anywhere inside a git repository."
@@ -160,6 +174,17 @@ print_usage() {
     echo "  version                 - Show version info"
     echo "  which                   - Show path to wt script"
     echo ""
+    echo "Spawn commands (multi-agent workflow):"
+    echo "  spawn <name> [options]  - Create worktree + launch Claude in tmux"
+    echo "    --context <text>      - Task context for Claude"
+    echo "    --auto                - Auto-start Claude with prompt"
+    echo "  ps                      - Show status of spawned sessions"
+    echo "  attach [name]           - Attach to tmux session (optionally to specific window)"
+    echo "  review <name>           - Show diff for parent review"
+    echo "  merge <name>            - Merge reviewed worktree into current branch"
+    echo "  kill <name>             - Kill a running tmux window"
+    echo "  init [--force] [--backup] [--audit] - Initialize wt.toml, docs/, issues/, and .claude/"
+    echo ""
     echo "Examples:"
     echo "  wt create feature/auth/login"
     echo "  wt -o create feature-branch   # create and cd"
@@ -168,8 +193,16 @@ print_usage() {
     echo "  wt open --all                 # open all in tabs"
     echo "  wt config base origin/main    # set base branch"
     echo "  wt config on-create 'pnpm install'  # set hook"
-    echo "  wt list"
-    echo "  wt update"
+    echo ""
+    echo "Spawn workflow (parallel Claude agents):"
+    echo "  wt -o create epic-123         # create integration worktree"
+    echo "  wt spawn AUT-456 --context 'Implement feature X...'  # spawn worker"
+    echo "  wt spawn AUT-456 --context 'Implement...' --auto     # auto-start"
+    echo "  wt ps                         # check status"
+    echo "  wt attach                     # watch workers in tmux"
+    echo "  wt review AUT-456             # review completed work"
+    echo "  wt merge AUT-456              # merge into current branch"
+    echo "  wt init                       # initialize wt for this repo"
 }
 
 detect_repo() {
@@ -197,6 +230,10 @@ detect_repo() {
     # Resolve symlinks for consistent path comparison (e.g., /tmp -> /private/tmp on macOS)
     REPO_DIR=$(cd "$REPO_DIR" && pwd -P)
     WORKTREES_BASE_DIR="$REPO_DIR/.worktrees"
+
+    # Current toplevel: the worktree root if in a worktree, otherwise the base repo.
+    # Used by commands that operate on the current directory (init, spawn).
+    TOPLEVEL_DIR=$(cd "$(git rev-parse --show-toplevel 2>/dev/null)" && pwd -P)
 }
 
 ensure_worktrees_excluded() {
@@ -743,6 +780,315 @@ exit_worktree() {
     echo -e "${GREEN}Done!${NC}" >&2
 }
 
+# Check if we're in a worktree (not the root repo)
+is_in_worktree() {
+    local current_dir=$(pwd -P)
+    case "$current_dir" in
+        "$WORKTREES_BASE_DIR"/*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# Handle spawn command - create worktree + launch Claude in tmux
+handle_spawn() {
+    local name="$1"
+    shift || true
+
+    if [ -z "$name" ]; then
+        echo -e "${RED}Error: Name is required${NC}" >&2
+        echo "Usage: wt spawn <name> [--context <text>] [--auto]" >&2
+        exit 1
+    fi
+
+    local context=""
+    local auto_mode=false
+
+    # Parse options first (before dependency checks)
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --context|-c)
+                context="$2"
+                shift 2
+                ;;
+            --auto)
+                auto_mode=true
+                shift
+                ;;
+            *)
+                echo -e "${RED}Error: Unknown option '$1'${NC}" >&2
+                exit 1
+                ;;
+        esac
+    done
+
+    # Check for required tools
+    check_tmux || exit 1
+
+    # Check if auto mode is configured in wt.toml (check current toplevel first, then base repo)
+    local toml_dir="$TOPLEVEL_DIR"
+    has_wt_toml "$toml_dir" || toml_dir="$REPO_DIR"
+    if has_wt_toml "$toml_dir"; then
+        local config_auto
+        config_auto=$(get_wt_config "spawn.auto" "$toml_dir") || true
+        [ "$config_auto" = "true" ] && auto_mode=true
+    fi
+
+    local worktree_path="$WORKTREES_BASE_DIR/$name"
+    local current_branch=$(git branch --show-current 2>/dev/null || echo "HEAD")
+
+    # Create worktree if it doesn't exist
+    if [ ! -d "$worktree_path" ]; then
+        echo -e "${BLUE}Creating worktree '$name' from '$current_branch'...${NC}" >&2
+
+        ensure_worktrees_excluded
+        mkdir -p "$WORKTREES_BASE_DIR"
+
+        cd "$REPO_DIR"
+
+        # Check if branch exists
+        if git show-ref --verify --quiet "refs/heads/$name" || git show-ref --verify --quiet "refs/remotes/origin/$name"; then
+            echo -e "${YELLOW}Using existing branch '$name'${NC}" >&2
+            git worktree add "$worktree_path" "$name" >&2
+        else
+            echo -e "${YELLOW}Creating new branch '$name' from $current_branch${NC}" >&2
+            git worktree add -b "$name" "$worktree_path" "$current_branch" >&2
+            git -C "$worktree_path" config push.autoSetupRemote true
+            git -C "$worktree_path" branch --unset-upstream 2>/dev/null || true
+        fi
+
+        # Run on-create hook
+        if [ "$NO_HOOKS" != "true" ]; then
+            run_on_create_hook "$worktree_path" || true
+        fi
+    else
+        echo -e "${YELLOW}Worktree '$name' already exists${NC}" >&2
+    fi
+
+    # Write context file if provided (for non-auto mode)
+    local context_file=""
+    if [ -n "$context" ]; then
+        context_file=$(write_context_file "$worktree_path" "$context")
+        echo -e "${BLUE}Context written to .claude-task${NC}" >&2
+    fi
+
+    # Register as spawned
+    register_spawn "$name" "$current_branch" "$context"
+
+    # Build prompt for auto mode
+    local prompt=""
+    if [ "$auto_mode" = true ]; then
+        prompt="$context"
+        if [ -z "$prompt" ]; then
+            echo -e "${YELLOW}Warning: No context for auto mode${NC}" >&2
+            auto_mode=false
+        else
+            echo -e "${BLUE}Auto mode enabled${NC}" >&2
+        fi
+    fi
+
+    # Launch in tmux
+    spawn_window "$name" "$worktree_path" "$context_file" "$auto_mode" "$prompt"
+
+    echo -e "${GREEN}Spawned '$name' in tmux session${NC}" >&2
+    echo -e "${BLUE}Attach with:${NC} wt attach $name" >&2
+}
+
+# Handle ps command - show status of spawned sessions
+handle_ps() {
+    local spawned_names
+    spawned_names=$(get_spawned_names)
+
+    if [ -z "$spawned_names" ]; then
+        echo "No spawned sessions"
+        return 0
+    fi
+
+    # Print header
+    printf "%-20s %-10s %-30s %-8s %-6s\n" "TASK" "STATUS" "BRANCH" "COMMITS" "DIRTY"
+    printf "%-20s %-10s %-30s %-8s %-6s\n" "----" "------" "------" "-------" "-----"
+
+    while IFS= read -r name; do
+        [ -z "$name" ] && continue
+
+        local worktree_path="$WORKTREES_BASE_DIR/$name"
+        local status="unknown"
+        local branch="-"
+        local commits="-"
+        local dirty="no"
+
+        # Get tmux status
+        status=$(get_window_status "$name")
+
+        if [ -d "$worktree_path" ]; then
+            # Get branch name
+            branch=$(git -C "$worktree_path" branch --show-current 2>/dev/null || echo "-")
+
+            # Count commits ahead of base
+            local base_branch
+            base_branch=$(get_base_branch)
+            commits=$(git -C "$worktree_path" rev-list --count "${base_branch}..HEAD" 2>/dev/null || echo "0")
+
+            # Check if dirty
+            if is_worktree_dirty "$worktree_path"; then
+                dirty="yes"
+            fi
+        fi
+
+        printf "%-20s %-10s %-30s %-8s %-6s\n" "$name" "$status" "$branch" "$commits" "$dirty"
+    done <<< "$spawned_names"
+}
+
+# Handle attach command - attach to tmux session
+handle_attach() {
+    local window_name="$1"
+
+    check_tmux || exit 1
+
+    attach_spawn "$window_name"
+}
+
+# Handle review command - show diff for parent review
+handle_review() {
+    local name="$1"
+    local full_diff=false
+
+    shift || true
+    [ "$1" = "--full" ] && full_diff=true
+
+    if [ -z "$name" ]; then
+        echo -e "${RED}Error: Name is required${NC}" >&2
+        echo "Usage: wt review <name> [--full]" >&2
+        exit 1
+    fi
+
+    local worktree_path="$WORKTREES_BASE_DIR/$name"
+
+    if [ ! -d "$worktree_path" ]; then
+        echo -e "${RED}Error: Worktree '$name' does not exist${NC}" >&2
+        exit 1
+    fi
+
+    local branch
+    branch=$(git -C "$worktree_path" branch --show-current 2>/dev/null)
+    local base_branch
+    base_branch=$(get_base_branch)
+
+    echo -e "${BOLD}Review: $name${NC}"
+    echo -e "${BLUE}Branch:${NC} $branch"
+    echo ""
+
+    # Show commit count
+    local commit_count
+    commit_count=$(git -C "$worktree_path" rev-list --count "${base_branch}..HEAD" 2>/dev/null || echo "0")
+    echo -e "${BLUE}Commits:${NC} $commit_count"
+    echo ""
+
+    # Show commit log
+    if [ "$commit_count" -gt 0 ]; then
+        echo -e "${BLUE}Commit history:${NC}"
+        git -C "$worktree_path" log --oneline "${base_branch}..HEAD" 2>/dev/null || true
+        echo ""
+    fi
+
+    # Show diff summary or full diff
+    if [ "$full_diff" = true ]; then
+        echo -e "${BLUE}Full diff:${NC}"
+        git -C "$worktree_path" diff "${base_branch}...HEAD" 2>/dev/null || true
+    else
+        echo -e "${BLUE}Changed files:${NC}"
+        git -C "$worktree_path" diff --stat "${base_branch}...HEAD" 2>/dev/null || true
+        echo ""
+        echo -e "${YELLOW}Use 'wt review $name --full' for complete diff${NC}"
+    fi
+
+    # Show if dirty
+    if is_worktree_dirty "$worktree_path"; then
+        echo ""
+        echo -e "${YELLOW}Warning: Worktree has uncommitted changes${NC}"
+    fi
+}
+
+# Handle merge command - merge reviewed worktree into current branch
+handle_merge() {
+    local name="$1"
+
+    if [ -z "$name" ]; then
+        echo -e "${RED}Error: Name is required${NC}" >&2
+        echo "Usage: wt merge <name>" >&2
+        exit 1
+    fi
+
+    local worktree_path="$WORKTREES_BASE_DIR/$name"
+
+    if [ ! -d "$worktree_path" ]; then
+        echo -e "${RED}Error: Worktree '$name' does not exist${NC}" >&2
+        exit 1
+    fi
+
+    local source_branch
+    source_branch=$(git -C "$worktree_path" branch --show-current 2>/dev/null)
+
+    if [ -z "$source_branch" ]; then
+        echo -e "${RED}Error: Could not determine branch for '$name'${NC}" >&2
+        exit 1
+    fi
+
+    # Check for uncommitted changes in source
+    if is_worktree_dirty "$worktree_path"; then
+        echo -e "${RED}Error: Worktree '$name' has uncommitted changes${NC}" >&2
+        echo "Commit or stash changes before merging." >&2
+        exit 1
+    fi
+
+    local current_branch
+    current_branch=$(git branch --show-current 2>/dev/null)
+
+    echo -e "${BLUE}Merging '$source_branch' into '$current_branch'...${NC}" >&2
+
+    # Perform merge
+    if git merge --no-ff "$source_branch" -m "Merge $name: work from spawned session"; then
+        echo -e "${GREEN}Merged '$name' successfully${NC}" >&2
+
+        # Unregister from spawned state
+        unregister_spawn "$name"
+
+        # Kill tmux window if it exists
+        kill_window "$name"
+
+        echo ""
+        echo -e "${YELLOW}Optionally remove the worktree with:${NC} wt remove $name"
+    else
+        echo -e "${RED}Merge failed. Resolve conflicts and try again.${NC}" >&2
+        exit 1
+    fi
+}
+
+# Handle kill command - kill a running tmux window
+handle_kill() {
+    local name="$1"
+
+    if [ -z "$name" ]; then
+        echo -e "${RED}Error: Name is required${NC}" >&2
+        echo "Usage: wt kill <name>" >&2
+        exit 1
+    fi
+
+    check_tmux || exit 1
+
+    local status
+    status=$(get_window_status "$name")
+
+    if [ "$status" = "no_session" ] || [ "$status" = "no_window" ]; then
+        echo -e "${YELLOW}No running session for '$name'${NC}" >&2
+    else
+        kill_window "$name"
+        echo -e "${GREEN}Killed session for '$name'${NC}" >&2
+    fi
+
+    # Unregister from spawned state
+    unregister_spawn "$name"
+}
+
 get_version() {
     local manifest="$INSTALL_DIR/manifest.toml"
     if [ -f "$manifest" ]; then
@@ -810,7 +1156,7 @@ while [[ "$1" == -* ]]; do
     esac
 done
 
-# Commands that don't need a git repo
+# Commands that don't need a git repo (or handle it themselves)
 case "$1" in
 update)
     update_worktree "$2"
@@ -827,6 +1173,11 @@ which)
     ;;
 health)
     health_check
+    exit 0
+    ;;
+init|setup)
+    shift  # remove 'init' or 'setup'
+    handle_setup "$@"
     exit 0
     ;;
 esac
@@ -876,6 +1227,26 @@ exit)
 config)
     shift  # remove 'config'
     handle_config "$@"
+    ;;
+spawn)
+    shift  # remove 'spawn'
+    handle_spawn "$@"
+    ;;
+ps)
+    handle_ps
+    ;;
+attach)
+    handle_attach "$2"
+    ;;
+review)
+    shift  # remove 'review'
+    handle_review "$@"
+    ;;
+merge)
+    handle_merge "$2"
+    ;;
+kill)
+    handle_kill "$2"
     ;;
 *)
     print_usage
