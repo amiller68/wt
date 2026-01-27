@@ -54,7 +54,13 @@ Review the diff for:
 
 ### 5. Documentation Check
 
-- Do changes require `README.md` updates (new commands, flags, changed behavior)?
+- Do changes require updates to usage docs in `docs/usage/`? Match changed topic to the right article:
+  - `docs/usage/worktrees.md` — creating, opening, removing worktrees; `-o` flag; glob patterns; terminal tabs
+  - `docs/usage/configuration.md` — base branch config, config file format, on-create hooks
+  - `docs/usage/init.md` — `wt init`, `--audit`, `--backup`, template files
+  - `docs/usage/orchestration.md` — `wt spawn`, `wt ps`, `wt attach`, `wt review`, `wt merge`, `wt kill`
+  - `docs/usage/shell-integration.md` — tab completion, how `-o` works, `wt which`
+- Does `README.md` need updates (new commands in the table, changed install steps, new guide links)?
 - Are new functions/commands documented?
 - Do `docs/index.md` or `CLAUDE.md` need corrections?
 
