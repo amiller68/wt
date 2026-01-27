@@ -54,7 +54,7 @@ source ~/.zshrc  # or ~/.bashrc
 | `wt review <name>` | Show diff for parent review |
 | `wt merge <name>` | Merge reviewed worktree into current branch |
 | `wt kill <name>` | Kill a running tmux window |
-| `wt init [--force] [--audit]` | Initialize wt.toml, docs/, issues/, and .claude/ |
+| `wt init [--force] [--backup] [--audit]` | Initialize wt.toml, docs/, issues/, and .claude/ |
 | `wt update` | Update wt to latest version |
 | `wt update --force` | Force update (reset to remote) |
 | `wt version` | Show version |
@@ -308,6 +308,7 @@ Initialize wt for a repo with one command:
 wt init              # Create wt.toml, docs/, issues/, .claude/, CLAUDE.md
 wt init --force      # Overwrite existing files
 wt init --audit      # Init + launch Claude to populate docs/ with project-specific content
+wt init --backup     # Back up existing files to .wt-backup/ before overwriting
 ```
 
 This creates:
@@ -324,6 +325,17 @@ This creates:
 - `draft.md` - Draft commit message for staged changes
 - `spawn.md` - Orchestrate parallel Claude workers
 - `issues.md` - Manage file-based issue tracking
+
+**Updating templates with `--backup`:**
+
+When wt updates its templates, use `--backup` to apply the new versions without losing your customizations:
+
+```bash
+# Back up current config, apply fresh templates, audit to reconcile
+wt init --force --backup --audit
+```
+
+This saves your existing CLAUDE.md, docs/, .claude/commands/, and .claude/settings.json to `.wt-backup/`, overwrites them with the latest templates, then launches Claude to merge your customizations back into the new structure. After verifying the result, remove `.wt-backup/`.
 
 ### Issue tracking
 

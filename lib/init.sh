@@ -7,6 +7,7 @@
 handle_setup() {
     local force=false
     local audit=false
+    local backup=false
 
     # Parse options
     while [ $# -gt 0 ]; do
@@ -19,9 +20,13 @@ handle_setup() {
                 audit=true
                 shift
                 ;;
+            --backup)
+                backup=true
+                shift
+                ;;
             *)
                 echo -e "${RED}Error: Unknown option '$1'${NC}" >&2
-                echo "Usage: wt init [--force] [--audit]" >&2
+                echo "Usage: wt init [--force] [--backup] [--audit]" >&2
                 exit 1
                 ;;
         esac
@@ -56,6 +61,11 @@ handle_setup() {
     if [ -f "$REPO_DIR/wt.toml" ] && [ "$force" != true ]; then
         echo -e "${RED}Error: Already initialized. Use --force to reinitialize.${NC}" >&2
         exit 1
+    fi
+
+    # Backup existing files before overwriting
+    if [ "$backup" = true ]; then
+        backup_existing_files
     fi
 
     echo -e "${BLUE}Initializing wt for this repository...${NC}" >&2
@@ -94,7 +104,7 @@ handle_setup() {
     echo -e "  .claude/                 - Claude Code settings and commands" >&2
     echo -e "  CLAUDE.md                - Project guide for Claude" >&2
     if [ "$audit" = true ]; then
-        run_audit
+        run_audit "$backup"
     else
         echo ""
         echo -e "${YELLOW}Next steps:${NC}" >&2
@@ -108,8 +118,49 @@ handle_init() {
     handle_setup "$@"
 }
 
+# Backup files that would be overwritten by init
+backup_existing_files() {
+    local backup_dir="$REPO_DIR/.wt-backup"
+    local backed_up=0
+
+    # Files and directories that init overwrites
+    local files_to_check=(
+        "CLAUDE.md"
+        "wt.toml"
+        ".claude/settings.json"
+    )
+    local dirs_to_check=(
+        ".claude/commands"
+        "docs"
+    )
+
+    for f in "${files_to_check[@]}"; do
+        if [ -f "$REPO_DIR/$f" ]; then
+            mkdir -p "$backup_dir/$(dirname "$f")"
+            cp "$REPO_DIR/$f" "$backup_dir/$f"
+            ((backed_up++))
+        fi
+    done
+
+    for d in "${dirs_to_check[@]}"; do
+        if [ -d "$REPO_DIR/$d" ]; then
+            mkdir -p "$backup_dir/$d"
+            cp -r "$REPO_DIR/$d"/. "$backup_dir/$d"/
+            ((backed_up++))
+        fi
+    done
+
+    if [ $backed_up -gt 0 ]; then
+        echo -e "${GREEN}Backed up $backed_up item(s) to .wt-backup/${NC}" >&2
+    else
+        echo -e "${YELLOW}No existing files to back up${NC}" >&2
+    fi
+}
+
 # Run Claude Code audit to populate docs/ with project-specific content
 run_audit() {
+    local has_backup="$1"
+
     if ! command -v claude &>/dev/null; then
         echo -e "${RED}Error: claude CLI is required for --audit. Install it first.${NC}" >&2
         exit 1
@@ -119,7 +170,31 @@ run_audit() {
     echo -e "${BLUE}Running audit: launching Claude to explore and document this codebase...${NC}" >&2
 
     local audit_prompt
-    audit_prompt='Explore this codebase and populate the project documentation.
+    if [ "$has_backup" = true ] && [ -d "$REPO_DIR/.wt-backup" ]; then
+        audit_prompt='Explore this codebase and populate the project documentation.
+
+A backup of previous configuration exists in .wt-backup/. Fresh templates have
+been applied. Your job is to produce the best possible result by combining the
+new template structure with any valuable customizations from the backup.
+
+1. Read CLAUDE.md and docs/ to understand the new template structure
+2. Read .wt-backup/ to see what the user had before (customizations, project-specific content)
+3. Explore the codebase: key files, directory structure, languages, frameworks, build system, test setup
+4. Update docs/index.md with project-specific instructions for AI coding agents:
+   - Project overview and purpose
+   - Key files and directories
+   - How to build, test, and run
+   - Code conventions and patterns to follow
+   - Common gotchas or important context
+   Incorporate any useful project-specific content from .wt-backup/docs/ if present.
+5. Update CLAUDE.md: merge the template structure with any project-specific sections
+   from .wt-backup/CLAUDE.md (versioning rules, testing instructions, etc.)
+6. Review .wt-backup/.claude/commands/ for any custom commands and copy them to
+   .claude/commands/ if they are not already present from the template
+7. Do NOT modify docs/issue-tracking.md (this is a generic guide)
+8. Commit your changes with a clear message'
+    else
+        audit_prompt='Explore this codebase and populate the project documentation.
 
 1. Read CLAUDE.md and docs/ to understand the current doc structure
 2. Explore the codebase: key files, directory structure, languages, frameworks, build system, test setup
@@ -131,6 +206,7 @@ run_audit() {
    - Common gotchas or important context
 4. Do NOT modify docs/issue-tracking.md (this is a generic guide)
 5. Commit your changes with a clear message'
+    fi
 
     (cd "$REPO_DIR" && claude -p --dangerously-skip-permissions "$audit_prompt")
 }

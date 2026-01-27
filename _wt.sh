@@ -14,7 +14,7 @@ LIB_DIR="$INSTALL_DIR/lib"
 [ -f "$LIB_DIR/config.sh" ] && source "$LIB_DIR/config.sh"
 [ -f "$LIB_DIR/tmux.sh" ] && source "$LIB_DIR/tmux.sh"
 [ -f "$LIB_DIR/spawn.sh" ] && source "$LIB_DIR/spawn.sh"
-[ -f "$LIB_DIR/setup.sh" ] && source "$LIB_DIR/setup.sh"
+[ -f "$LIB_DIR/init.sh" ] && source "$LIB_DIR/init.sh"
 
 # Colors for output
 RED='\033[0;31m'
@@ -183,7 +183,7 @@ print_usage() {
     echo "  review <name>           - Show diff for parent review"
     echo "  merge <name>            - Merge reviewed worktree into current branch"
     echo "  kill <name>             - Kill a running tmux window"
-    echo "  init [--force] [--audit] - Initialize wt.toml, docs/, issues/, and .claude/"
+    echo "  init [--force] [--backup] [--audit] - Initialize wt.toml, docs/, issues/, and .claude/"
     echo ""
     echo "Examples:"
     echo "  wt create feature/auth/login"

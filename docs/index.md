@@ -8,7 +8,7 @@ You are working on `wt` — a bash CLI for managing git worktrees, designed for 
 _wt.sh              # Main entry point and command dispatcher
 lib/
 ├── config.sh       # Config file handling (~/.config/wt/config)
-├── setup.sh        # wt init — repo initialization, template copying
+├── init.sh         # wt init — repo initialization, template copying
 ├── spawn.sh        # Spawn state tracking (JSON in ~/.config/wt/spawned/)
 └── tmux.sh         # tmux session/window management for spawned workers
 shell/
