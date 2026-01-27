@@ -1,38 +1,37 @@
-# Development Guide
+# Project Guide
 
-Guide for AI agents and developers working on this Git worktree manager.
+`wt` is a bash CLI for managing git worktrees, designed for parallel Claude Code sessions.
 
-## Project Overview
+## Quick Reference
 
-`wt` is a CLI tool for managing git worktrees, designed for parallel Claude Code sessions.
+```bash
+source ./dev.sh     # Use local wt for development
+./test.sh           # Run all tests (required before committing)
+```
 
 ## Documentation
 
-- `docs/index.md` — Agent instructions and key files reference
+Project documentation lives in `docs/`:
+- `docs/index.md` — Agent instructions for spawned workers (project overview, architecture, conventions)
 - `docs/issue-tracking.md` — File-based issue tracking convention
+
+## Issues
+
+Track work items in `issues/`. See `docs/issue-tracking.md` for the convention.
 
 ## Versioning
 
 - **Location:** `manifest.toml`
 - **Format:** Semantic versioning (MAJOR.MINOR.PATCH)
-- **Rules:**
-  - MAJOR: Breaking changes (removed commands, changed behavior)
-  - MINOR: New features, commands, flags (backward compatible)
-  - PATCH: Bug fixes, docs, internal refactoring
+- MAJOR: Breaking changes (removed commands, changed behavior)
+- MINOR: New features, commands, flags (backward compatible)
+- PATCH: Bug fixes, docs, internal refactoring
 
-## Testing
+## Key Conventions
 
-- **Run all:** `./test.sh`
-- **Structure:** `tests/test_*.sh` modules, `assert_*` helpers in test.sh
-- **Adding tests:** Create new test module or add to existing one
-
-## Documentation Updates
-
-Update `README.md` when:
-- New commands/flags added
-- Behavior changed
-- New configuration options
-
-## Issues
-
-Track work items in `issues/`. See `docs/issue-tracking.md` for the convention.
+- Pure bash, no build step. All code in `_wt.sh` and `lib/*.sh`
+- Functions use `snake_case`, command handlers use `handle_<command>()`
+- stdout is for eval-able output only; errors and messages go to stderr
+- Quote all variables, use `[[ ... ]]` for conditionals
+- Tests go in `tests/test_<feature>.sh`
+- Run `./test.sh` before committing
