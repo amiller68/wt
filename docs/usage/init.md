@@ -1,0 +1,126 @@
+# Setting Up a Repo with `wt init`
+
+`wt init` bootstraps a repository for use with `wt` and Claude Code. It creates project documentation, slash commands, sensible permissions, and issue tracking — everything an AI coding agent needs to be productive from the start.
+
+## New Repo
+
+```bash
+mkdir my-project && cd my-project
+git init
+wt init
+```
+
+This creates:
+
+```
+my-project/
+├── CLAUDE.md                 # Project guide — points Claude at docs/
+├── wt.toml                   # wt spawn configuration
+├── docs/
+│   ├── index.md              # Agent instructions (key files, conventions, how to build/test)
+│   └── issue-tracking.md     # File-based issue tracking convention
+├── issues/                   # Work items as markdown files
+└── .claude/
+    ├── settings.json         # Permissions (git, gh, file ops, etc.)
+    └── commands/
+        ├── check.md          # /check — run build/test/lint
+        ├── draft.md          # /draft — push and create draft PR
+        ├── review.md         # /review — review branch changes
+        ├── issues.md         # /issues — discover and manage work items
+        └── spawn.md          # /spawn — orchestrate parallel workers
+```
+
+After init, edit `docs/index.md` with your project's specifics — key files, build commands, conventions. This is what every spawned worker reads first.
+
+## Existing Repo
+
+```bash
+cd ~/projects/my-app
+wt init
+```
+
+If files already exist (`CLAUDE.md`, `docs/`, `.claude/`), init skips them. Use `--force` to overwrite:
+
+```bash
+wt init --force
+```
+
+## Auto-Populate with `--audit`
+
+Instead of writing `docs/index.md` by hand, let Claude explore your codebase and fill it in:
+
+```bash
+wt init --audit              # init + Claude explores and documents
+wt init --force --audit      # overwrite existing, then audit
+```
+
+The audit launches Claude to:
+1. Explore the codebase (languages, frameworks, directory structure, build system, tests)
+2. Write project-specific content in `docs/index.md`
+3. Update `CLAUDE.md` with project-specific sections
+4. Tailor `.claude/commands/` to your toolchain (e.g., replace generic check.md with your actual test command)
+5. Commit the result
+
+## Updating Templates with `--backup`
+
+When `wt` ships new templates, apply them without losing your customizations:
+
+```bash
+wt init --force --backup --audit
+```
+
+This:
+1. **Backs up** your existing `CLAUDE.md`, `wt.toml`, `docs/`, and `.claude/` to `.wt-backup/`
+2. **Overwrites** with fresh templates (`--force`)
+3. **Audits** — Claude reads `.wt-backup/`, explores the codebase, and merges your customizations back into the new template structure
+
+After verifying the result, remove the backup:
+
+```bash
+rm -rf .wt-backup/
+```
+
+## What Each File Does
+
+### `CLAUDE.md`
+
+The entry point Claude reads when starting a session. Points to `docs/` for detailed instructions. Add project-specific sections here (versioning rules, release process, etc.).
+
+### `docs/index.md`
+
+The core agent instructions document. Spawned workers read this to understand:
+- What the project is and how it's structured
+- How to build, test, and run it
+- Code conventions to follow
+- Common gotchas
+
+### `.claude/settings.json`
+
+Permissions for Claude Code. The defaults allow common safe operations (git, gh, file reads/writes, tmux, jq) and deny dangerous ones (rm -rf, sudo, force push, reading secrets). Edit this to add project-specific tools.
+
+### `.claude/commands/`
+
+Slash commands available in Claude Code sessions. The defaults are generic — the `--audit` flag tailors them to your project (e.g., replacing multi-language detection in `/check` with your actual `npm test` or `cargo test`).
+
+### `wt.toml`
+
+Spawn configuration:
+
+```toml
+[spawn]
+auto = true    # Always use auto mode (--auto flag)
+```
+
+### `docs/issue-tracking.md`
+
+Convention for file-based issue tracking in `issues/`. If you use Linear, Jira, or GitHub Issues instead, you can ignore or remove this.
+
+## Flags
+
+| Flag | Description |
+|------|-------------|
+| `--force` | Overwrite existing files |
+| `--backup` | Save existing files to `.wt-backup/` before overwriting |
+| `--audit` | Launch Claude to explore the codebase and populate docs |
+
+Flags combine: `wt init --force --backup --audit` is the recommended way to apply template updates.
