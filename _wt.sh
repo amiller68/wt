@@ -177,14 +177,13 @@ print_usage() {
     echo "Spawn commands (multi-agent workflow):"
     echo "  spawn <name> [options]  - Create worktree + launch Claude in tmux"
     echo "    --context <text>      - Task context for Claude"
-    echo "    --auto                - Auto-start Claude with prompt (uses agents context)"
-    echo "    --no-agents           - Skip loading agents context"
+    echo "    --auto                - Auto-start Claude with prompt"
     echo "  ps                      - Show status of spawned sessions"
     echo "  attach [name]           - Attach to tmux session (optionally to specific window)"
     echo "  review <name>           - Show diff for parent review"
     echo "  merge <name>            - Merge reviewed worktree into current branch"
     echo "  kill <name>             - Kill a running tmux window"
-    echo "  init [--force]          - Initialize wt.toml, agents/, and .claude/"
+    echo "  init [--force] [--audit] - Initialize wt.toml, docs/, issues/, and .claude/"
     echo ""
     echo "Examples:"
     echo "  wt create feature/auth/login"
@@ -231,6 +230,10 @@ detect_repo() {
     # Resolve symlinks for consistent path comparison (e.g., /tmp -> /private/tmp on macOS)
     REPO_DIR=$(cd "$REPO_DIR" && pwd -P)
     WORKTREES_BASE_DIR="$REPO_DIR/.worktrees"
+
+    # Current toplevel: the worktree root if in a worktree, otherwise the base repo.
+    # Used by commands that operate on the current directory (init, spawn).
+    TOPLEVEL_DIR=$(cd "$(git rev-parse --show-toplevel 2>/dev/null)" && pwd -P)
 }
 
 ensure_worktrees_excluded() {
@@ -793,13 +796,12 @@ handle_spawn() {
 
     if [ -z "$name" ]; then
         echo -e "${RED}Error: Name is required${NC}" >&2
-        echo "Usage: wt spawn <name> [--context <text>] [--auto] [--no-agents]" >&2
+        echo "Usage: wt spawn <name> [--context <text>] [--auto]" >&2
         exit 1
     fi
 
     local context=""
     local auto_mode=false
-    local no_agents=false
 
     # Parse options first (before dependency checks)
     while [ $# -gt 0 ]; do
@@ -812,10 +814,6 @@ handle_spawn() {
                 auto_mode=true
                 shift
                 ;;
-            --no-agents)
-                no_agents=true
-                shift
-                ;;
             *)
                 echo -e "${RED}Error: Unknown option '$1'${NC}" >&2
                 exit 1
@@ -826,10 +824,12 @@ handle_spawn() {
     # Check for required tools
     check_tmux || exit 1
 
-    # Check if auto mode is configured in wt.toml
-    if has_wt_toml "$REPO_DIR"; then
+    # Check if auto mode is configured in wt.toml (check current toplevel first, then base repo)
+    local toml_dir="$TOPLEVEL_DIR"
+    has_wt_toml "$toml_dir" || toml_dir="$REPO_DIR"
+    if has_wt_toml "$toml_dir"; then
         local config_auto
-        config_auto=$(get_wt_config "spawn.auto" "$REPO_DIR") || true
+        config_auto=$(get_wt_config "spawn.auto" "$toml_dir") || true
         [ "$config_auto" = "true" ] && auto_mode=true
     fi
 
@@ -877,19 +877,12 @@ handle_spawn() {
     # Build prompt for auto mode
     local prompt=""
     if [ "$auto_mode" = true ]; then
-        if [ "$no_agents" = true ]; then
-            # Just use task context
-            prompt="$context"
-        else
-            # Build full prompt with agents context
-            prompt=$(build_spawn_prompt "$context" "$REPO_DIR")
-        fi
-
+        prompt="$context"
         if [ -z "$prompt" ]; then
-            echo -e "${YELLOW}Warning: No prompt for auto mode (no context or agents)${NC}" >&2
+            echo -e "${YELLOW}Warning: No context for auto mode${NC}" >&2
             auto_mode=false
         else
-            echo -e "${BLUE}Auto mode enabled - Claude will start automatically${NC}" >&2
+            echo -e "${BLUE}Auto mode enabled${NC}" >&2
         fi
     fi
 
@@ -1163,7 +1156,7 @@ while [[ "$1" == -* ]]; do
     esac
 done
 
-# Commands that don't need a git repo
+# Commands that don't need a git repo (or handle it themselves)
 case "$1" in
 update)
     update_worktree "$2"
@@ -1180,6 +1173,11 @@ which)
     ;;
 health)
     health_check
+    exit 0
+    ;;
+init|setup)
+    shift  # remove 'init' or 'setup'
+    handle_setup "$@"
     exit 0
     ;;
 esac
@@ -1249,10 +1247,6 @@ merge)
     ;;
 kill)
     handle_kill "$2"
-    ;;
-init|setup)
-    shift  # remove 'init' or 'setup'
-    handle_setup "$@"
     ;;
 *)
     print_usage

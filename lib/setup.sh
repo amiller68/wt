@@ -46,8 +46,11 @@ handle_setup() {
         fi
     fi
 
-    # Now detect repo (sets REPO_DIR, WORKTREES_BASE_DIR)
+    # Now detect repo (sets REPO_DIR, WORKTREES_BASE_DIR, TOPLEVEL_DIR)
     detect_repo
+
+    # Init targets the current toplevel (worktree-aware), not the base repo
+    REPO_DIR="$TOPLEVEL_DIR"
 
     # Check if already initialized (wt.toml exists)
     if [ -f "$REPO_DIR/wt.toml" ] && [ "$force" != true ]; then
@@ -69,14 +72,12 @@ handle_setup() {
 
     # 4. Set up Claude Code configuration
     local claude_dir="$REPO_DIR/.claude"
-    local settings_file="$claude_dir/settings.json"
     local commands_dir="$claude_dir/commands"
 
-    mkdir -p "$claude_dir"
     mkdir -p "$commands_dir"
 
-    # Initialize or update settings.json
-    setup_settings_json "$settings_file" "$force"
+    # Create settings.json with sensible defaults
+    setup_settings_json "$claude_dir/settings.json" "$force"
 
     # Copy command files
     setup_commands "$commands_dir" "$force"
@@ -131,7 +132,7 @@ run_audit() {
 4. Do NOT modify docs/issue-tracking.md (this is a generic guide)
 5. Commit your changes with a clear message'
 
-    (cd "$REPO_DIR" && claude -p "$audit_prompt")
+    (cd "$REPO_DIR" && claude -p --dangerously-skip-permissions "$audit_prompt")
 }
 
 # Create wt.toml with sensible defaults
@@ -151,24 +152,6 @@ init_wt_toml() {
 [spawn]
 # Always use auto mode (--auto flag)
 auto = true
-
-[setup]
-# Bash commands to allow without prompting
-allow = [
-    "git status",
-    "git diff",
-    "git add",
-    "git commit",
-    "git push",
-    "git log",
-    "git branch"
-]
-
-# Bash commands to deny
-deny = [
-    "rm -rf *",
-    "sudo *"
-]
 EOF
 
     echo -e "${GREEN}Created wt.toml${NC}" >&2
@@ -219,6 +202,118 @@ EOF
     fi
 }
 
+# Create .claude/settings.json with sensible defaults
+setup_settings_json() {
+    local settings_file="$1"
+    local force="$2"
+
+    if [ -f "$settings_file" ] && [ "$force" != true ]; then
+        echo -e "${YELLOW}settings.json already exists (skipping)${NC}" >&2
+        return 0
+    fi
+
+    cat > "$settings_file" << 'SETTINGS_EOF'
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(git status)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git branch:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git checkout:*)",
+      "Bash(git stash:*)",
+      "Bash(git pull:*)",
+      "Bash(git push:*)",
+      "Bash(git fetch:*)",
+      "Bash(git remote:*)",
+      "Bash(git rev-parse:*)",
+      "Bash(git worktree:*)",
+      "Bash(git reset:*)",
+      "Bash(git restore:*)",
+      "Bash(gh pr view:*)",
+      "Bash(gh pr list:*)",
+      "Bash(gh pr diff:*)",
+      "Bash(gh pr create:*)",
+      "Bash(gh pr checks:*)",
+      "Bash(gh issue list:*)",
+      "Bash(gh issue view:*)",
+      "Bash(gh repo view:*)",
+      "Bash(gh status)",
+      "Bash(cat:*)",
+      "Bash(find:*)",
+      "Bash(ls:*)",
+      "Bash(pwd)",
+      "Bash(echo:*)",
+      "Bash(which:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(grep:*)",
+      "Bash(rg:*)",
+      "Bash(mkdir:*)",
+      "Bash(touch:*)",
+      "Bash(cp:*)",
+      "Bash(mv:*)",
+      "Bash(rm -f:*)",
+      "Bash(chmod:*)",
+      "Bash(wc:*)",
+      "Bash(sort:*)",
+      "Bash(uniq:*)",
+      "Bash(tree:*)",
+      "Bash(diff:*)",
+      "Bash(stat:*)",
+      "Bash(file:*)",
+      "Bash(sed:*)",
+      "Bash(awk:*)",
+      "Bash(xargs:*)",
+      "Bash(date:*)",
+      "Bash(env:*)",
+      "Bash(basename:*)",
+      "Bash(dirname:*)",
+      "Bash(realpath:*)",
+      "Bash(tmux:*)",
+      "Bash(jq:*)",
+      "Bash(curl:*)",
+      "Bash(ps:*)",
+      "Read",
+      "Write",
+      "Edit",
+      "WebSearch",
+      "WebFetch"
+    ],
+    "deny": [
+      "Bash(rm -rf:*)",
+      "Bash(rm -r:*)",
+      "Bash(sudo:*)",
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Read(.env)",
+      "Read(.env.*)",
+      "Read(./.env*)",
+      "Read(**/.env*)",
+      "Read(**/.aws/**)",
+      "Read(**/.ssh/**)",
+      "Read(*.pem)",
+      "Read(*.key)",
+      "Write(.env)",
+      "Write(.env.*)",
+      "Write(./.env*)",
+      "Write(*.pem)",
+      "Write(*.key)",
+      "Edit(.env)",
+      "Edit(.env.*)",
+      "Edit(./.env*)"
+    ]
+  }
+}
+SETTINGS_EOF
+
+    echo -e "${GREEN}Created settings.json${NC}" >&2
+}
+
 # Copy CLAUDE.md template to repo root
 init_claude_md() {
     local force="$1"
@@ -236,68 +331,6 @@ init_claude_md() {
     else
         echo -e "${YELLOW}No CLAUDE.md template found in wt installation${NC}" >&2
     fi
-}
-
-# Setup settings.json with permissions from wt.toml
-setup_settings_json() {
-    local settings_file="$1"
-    local force="$2"
-
-    local existing_settings='{}'
-    if [ -f "$settings_file" ]; then
-        existing_settings=$(cat "$settings_file")
-    fi
-
-    # Start with existing or default structure
-    local new_settings
-    new_settings=$(echo "$existing_settings" | jq '{
-        permissions: (.permissions // {allow: [], deny: []})
-    }')
-
-    # Read permissions from wt.toml if available
-    if has_wt_toml "$REPO_DIR"; then
-        echo -e "${BLUE}Reading permissions from wt.toml...${NC}" >&2
-
-        # Get allow permissions
-        local allow_perms
-        allow_perms=$(get_wt_config_array "setup.allow" "$REPO_DIR") || true
-
-        if [ -n "$allow_perms" ]; then
-            # Build JSON array of allow permissions
-            local allow_json='[]'
-            while IFS= read -r perm; do
-                [ -z "$perm" ] && continue
-                allow_json=$(echo "$allow_json" | jq --arg p "Bash($perm)" '. + [$p]')
-            done <<< "$allow_perms"
-
-            # Merge with existing allow permissions
-            new_settings=$(echo "$new_settings" | jq --argjson new "$allow_json" '
-                .permissions.allow = ((.permissions.allow // []) + $new | unique)
-            ')
-        fi
-
-        # Get deny permissions
-        local deny_perms
-        deny_perms=$(get_wt_config_array "setup.deny" "$REPO_DIR") || true
-
-        if [ -n "$deny_perms" ]; then
-            # Build JSON array of deny permissions
-            local deny_json='[]'
-            while IFS= read -r perm; do
-                [ -z "$perm" ] && continue
-                deny_json=$(echo "$deny_json" | jq --arg p "Bash($perm)" '. + [$p]')
-            done <<< "$deny_perms"
-
-            # Merge with existing deny permissions
-            new_settings=$(echo "$new_settings" | jq --argjson new "$deny_json" '
-                .permissions.deny = ((.permissions.deny // []) + $new | unique)
-            ')
-        fi
-    fi
-
-    # Write settings file
-    echo "$new_settings" | jq '.' > "$settings_file"
-    echo -e "${GREEN}Updated settings.json${NC}" >&2
 }
 
 # Copy command files from wt install dir to .claude/commands

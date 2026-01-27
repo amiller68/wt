@@ -86,70 +86,32 @@ output=$(_wt spawn test-auto --context "test" --auto 2>&1) || true
 [[ "$output" == *"Unknown option"* ]] && result="rejected auto" || result="accepted auto"
 assert_eq "accepted auto" "$result" "spawn accepts --auto flag"
 
-# Test: spawn accepts --no-agents flag
-echo "--- Test: spawn accepts --no-agents flag ---"
-output=$(_wt spawn test-noagents --context "test" --no-agents 2>&1) || true
-# Should not reject --no-agents as unknown
-[[ "$output" == *"Unknown option"* ]] && result="rejected no-agents" || result="accepted no-agents"
-assert_eq "accepted no-agents" "$result" "spawn accepts --no-agents flag"
-
-# Test: init command exists
-echo "--- Test: init command exists ---"
-output=$(_wt init 2>&1) || true
-# Should either run or fail with a known error, not "unknown command"
-[[ "$output" == *"Initializing"* ]] || [[ "$output" == *"jq is required"* ]] && result="has init" || result="no init"
-assert_eq "has init" "$result" "init command is recognized"
-
-# Test: help includes init command
-echo "--- Test: help includes init ---"
-output=$(_wt 2>&1) || true
-[[ "$output" == *"init"* ]] && result="has init" || result="no init"
-assert_eq "has init" "$result" "help text includes init command"
-
 # Test: help includes --auto documentation
 echo "--- Test: help includes --auto ---"
 output=$(_wt 2>&1) || true
 [[ "$output" == *"--auto"* ]] && result="has auto" || result="no auto"
 assert_eq "has auto" "$result" "help text includes --auto flag"
 
-# --- Agent context loading tests ---
+# Test: help does NOT include --no-agents (removed)
+echo "--- Test: help does not include --no-agents ---"
+output=$(_wt 2>&1) || true
+[[ "$output" == *"--no-agents"* ]] && result="still has no-agents" || result="removed"
+assert_eq "removed" "$result" "help text does not include --no-agents flag"
 
-echo ""
-echo "--- Agent context tests ---"
+# Test: init accepts --audit flag (not rejected as unknown)
+echo "--- Test: init accepts --audit flag ---"
+# Create wt.toml so init exits early with "Already initialized" instead of running fully
+echo '[spawn]' > "$TEST_DIR/wt.toml"
+output=$(_wt init --audit 2>&1) || true
+rm -f "$TEST_DIR/wt.toml"
+[[ "$output" == *"Unknown option"* ]] && result="rejected audit" || result="accepted audit"
+assert_eq "accepted audit" "$result" "init accepts --audit flag"
 
-# Test: find_agents_dir returns default path
-echo "--- Test: find_agents_dir default ---"
-if type find_agents_dir &>/dev/null; then
-    agents_dir=$(find_agents_dir "$TEST_DIR")
-    [[ "$agents_dir" == "$TEST_DIR/agents" ]] && result="correct" || result="wrong"
-    assert_eq "correct" "$result" "find_agents_dir returns default ./agents path"
-else
-    echo -e "${GREEN}PASS${NC}: find_agents_dir not directly testable (internal)"
-    ((PASS++))
-fi
-
-# Test: has_agents_index returns false when no agents dir
-echo "--- Test: has_agents_index no dir ---"
-if type has_agents_index &>/dev/null; then
-    has_agents_index "$TEST_DIR" && result="has index" || result="no index"
-    assert_eq "no index" "$result" "has_agents_index returns false when no agents dir"
-else
-    echo -e "${GREEN}PASS${NC}: has_agents_index not directly testable (internal)"
-    ((PASS++))
-fi
-
-# Test: has_agents_index returns true when INDEX.md exists
-echo "--- Test: has_agents_index with index ---"
-if type has_agents_index &>/dev/null; then
-    mkdir -p "$TEST_DIR/agents"
-    echo "# Test Index" > "$TEST_DIR/agents/INDEX.md"
-    has_agents_index "$TEST_DIR" && result="has index" || result="no index"
-    assert_eq "has index" "$result" "has_agents_index returns true with INDEX.md"
-    rm -rf "$TEST_DIR/agents"
-else
-    echo -e "${GREEN}PASS${NC}: has_agents_index not directly testable (internal)"
-    ((PASS++))
-fi
+# Test: help includes --audit documentation
+echo "--- Test: help includes --audit ---"
+output=$(_wt 2>&1) || true
+[[ "$output" == *"--audit"* ]] && result="has audit" || result="no audit"
+assert_eq "has audit" "$result" "help text includes --audit flag"
 
 # --- wt.toml parsing tests ---
 
@@ -185,23 +147,120 @@ if type get_wt_config &>/dev/null; then
     cat > "$TEST_DIR/wt.toml" << 'EOF'
 [spawn]
 auto = true
-
-[agents]
-dir = "./custom-agents"
 EOF
     REPO_DIR="$TEST_DIR"
     value=$(get_wt_config "spawn.auto" "$TEST_DIR")
     [[ "$value" == "true" ]] && result="correct" || result="wrong: $value"
     assert_eq "correct" "$result" "get_wt_config parses spawn.auto"
 
-    value=$(get_wt_config "agents.dir" "$TEST_DIR")
-    [[ "$value" == "./custom-agents" ]] && result="correct" || result="wrong: $value"
-    assert_eq "correct" "$result" "get_wt_config parses agents.dir"
-
     rm -f "$TEST_DIR/wt.toml"
 else
     echo -e "${GREEN}PASS${NC}: get_wt_config not directly testable (internal)"
     ((PASS++))
-    echo -e "${GREEN}PASS${NC}: get_wt_config not directly testable (internal)"
+fi
+
+# --- Init command tests ---
+
+echo ""
+echo "--- Init command tests ---"
+
+# Test: init command exists
+echo "--- Test: init command exists ---"
+output=$(_wt init 2>&1) || true
+# Should either run or fail with a known error, not "unknown command"
+[[ "$output" == *"Initializing"* ]] || [[ "$output" == *"jq is required"* ]] || [[ "$output" == *"Already initialized"* ]] && result="has init" || result="no init"
+assert_eq "has init" "$result" "init command is recognized"
+
+# Test: help includes init command
+echo "--- Test: help includes init ---"
+output=$(_wt 2>&1) || true
+[[ "$output" == *"init"* ]] && result="has init" || result="no init"
+assert_eq "has init" "$result" "help text includes init command"
+
+# Test: init errors on existing wt.toml without --force
+echo "--- Test: init errors without --force ---"
+if command -v jq &>/dev/null; then
+    # Create a wt.toml to simulate already-initialized repo
+    echo '[spawn]' > "$TEST_DIR/wt.toml"
+    echo 'auto = true' >> "$TEST_DIR/wt.toml"
+    REPO_DIR="$TEST_DIR"
+    output=$(_wt init 2>&1) || true
+    [[ "$output" == *"Already initialized"* ]] && result="blocks" || result="no block: $output"
+    assert_eq "blocks" "$result" "init errors on existing wt.toml without --force"
+    rm -f "$TEST_DIR/wt.toml"
+else
+    echo -e "${GREEN}PASS${NC}: init --force test skipped (no jq)"
+    ((PASS++))
+fi
+
+# Test: init creates docs/, issues/, CLAUDE.md
+echo "--- Test: init creates expected files ---"
+if command -v jq &>/dev/null; then
+    # Remove any existing files from prior init
+    rm -rf "$TEST_DIR/docs" "$TEST_DIR/issues" "$TEST_DIR/CLAUDE.md" "$TEST_DIR/wt.toml" "$TEST_DIR/.claude"
+    REPO_DIR="$TEST_DIR"
+    output=$(_wt init 2>&1) || true
+
+    [[ -d "$TEST_DIR/docs" ]] && result="has docs" || result="no docs"
+    assert_eq "has docs" "$result" "init creates docs/"
+
+    [[ -d "$TEST_DIR/issues" ]] && result="has issues" || result="no issues"
+    assert_eq "has issues" "$result" "init creates issues/"
+
+    [[ -f "$TEST_DIR/wt.toml" ]] && result="has toml" || result="no toml"
+    assert_eq "has toml" "$result" "init creates wt.toml"
+
+    [[ -d "$TEST_DIR/.claude/commands" ]] && result="has commands" || result="no commands"
+    assert_eq "has commands" "$result" "init creates .claude/commands/"
+
+    # Verify CLAUDE.md was created (if template exists in install dir)
+    if [ -f "$INSTALL_DIR/templates/CLAUDE.md" ]; then
+        [[ -f "$TEST_DIR/CLAUDE.md" ]] && result="has claude_md" || result="no claude_md"
+        assert_eq "has claude_md" "$result" "init creates CLAUDE.md"
+    else
+        echo -e "${GREEN}PASS${NC}: CLAUDE.md template not found (skipping check)"
+        ((PASS++))
+    fi
+
+    # Verify docs files were copied from templates
+    if [ -d "$INSTALL_DIR/templates/docs" ]; then
+        [[ -f "$TEST_DIR/docs/index.md" ]] && result="has index" || result="no index"
+        assert_eq "has index" "$result" "init copies docs/index.md from templates"
+
+        [[ -f "$TEST_DIR/docs/issue-tracking.md" ]] && result="has tracking" || result="no tracking"
+        assert_eq "has tracking" "$result" "init copies docs/issue-tracking.md from templates"
+    else
+        echo -e "${GREEN}PASS${NC}: templates/docs not found (skipping check)"
+        ((PASS++))
+        echo -e "${GREEN}PASS${NC}: templates/docs not found (skipping check)"
+        ((PASS++))
+    fi
+
+    # Verify wt.toml does NOT have [agents] section
+    if [ -f "$TEST_DIR/wt.toml" ]; then
+        if grep -q '\[agents\]' "$TEST_DIR/wt.toml" 2>/dev/null; then
+            result="has agents section"
+        else
+            result="no agents section"
+        fi
+        assert_eq "no agents section" "$result" "wt.toml does not contain [agents] section"
+    fi
+
+    # Clean up
+    rm -rf "$TEST_DIR/docs" "$TEST_DIR/issues" "$TEST_DIR/CLAUDE.md" "$TEST_DIR/wt.toml" "$TEST_DIR/.claude"
+else
+    echo -e "${GREEN}PASS${NC}: init file creation test skipped (no jq)"
+    ((PASS++))
+    echo -e "${GREEN}PASS${NC}: (skipped)"
+    ((PASS++))
+    echo -e "${GREEN}PASS${NC}: (skipped)"
+    ((PASS++))
+    echo -e "${GREEN}PASS${NC}: (skipped)"
+    ((PASS++))
+    echo -e "${GREEN}PASS${NC}: (skipped)"
+    ((PASS++))
+    echo -e "${GREEN}PASS${NC}: (skipped)"
+    ((PASS++))
+    echo -e "${GREEN}PASS${NC}: (skipped)"
     ((PASS++))
 fi

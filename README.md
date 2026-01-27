@@ -298,11 +298,6 @@ Repos can include a `wt.toml` file for spawn configuration:
 ```toml
 [spawn]
 auto = true       # Always use auto mode (default: false)
-
-[setup]
-# Bash commands to allow during wt setup
-allow = ["pnpm *", "make *", "git *"]
-deny = ["rm -rf *", "sudo *"]
 ```
 
 ### Init command
@@ -320,8 +315,8 @@ This creates:
 - `docs/` - Agent instructions and project documentation
 - `issues/` - File-based issue tracking directory
 - `CLAUDE.md` - Project guide pointing to docs/
-- `.claude/settings.json` - Claude permissions from wt.toml
-- `.claude/commands/` - Default slash commands
+- `.claude/settings.json` - Claude Code permissions (sensible defaults)
+- `.claude/commands/` - Slash commands for Claude Code
 
 **Default commands shipped with wt:**
 - `check.md` - Run project checks (make check, npm test, cargo test)

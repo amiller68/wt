@@ -20,7 +20,7 @@ get_spawn_state_file() {
 # Load spawn state for current repo
 load_spawn_state() {
     local state_file
-    state_file=$(get_spawn_state_file "$REPO_DIR")
+    state_file=$(get_spawn_state_file "$TOPLEVEL_DIR")
 
     if [ ! -f "$state_file" ]; then
         echo '{"spawned":[]}'
@@ -36,7 +36,7 @@ save_spawn_state() {
     local spawn_dir
     spawn_dir=$(get_spawn_dir)
     local state_file
-    state_file=$(get_spawn_state_file "$REPO_DIR")
+    state_file=$(get_spawn_state_file "$TOPLEVEL_DIR")
 
     mkdir -p "$spawn_dir"
     echo "$state" | jq '.' > "$state_file"
@@ -123,94 +123,3 @@ write_context_file() {
     echo "$context_file"
 }
 
-# --- Agent Context Loading ---
-
-# Find the agents directory for the current repo
-# Uses wt.toml agents.dir if set, otherwise defaults to ./agents
-find_agents_dir() {
-    local repo_root="${1:-$REPO_DIR}"
-
-    # Check wt.toml for custom agents dir
-    local agents_dir
-    if has_wt_toml "$repo_root"; then
-        agents_dir=$(get_wt_config "agents.dir" "$repo_root") || true
-    fi
-
-    # Default to ./agents
-    agents_dir="${agents_dir:-./agents}"
-
-    # Resolve relative to repo root
-    if [[ "$agents_dir" == ./* ]]; then
-        agents_dir="$repo_root/${agents_dir#./}"
-    elif [[ "$agents_dir" != /* ]]; then
-        agents_dir="$repo_root/$agents_dir"
-    fi
-
-    echo "$agents_dir"
-}
-
-# Check if agents INDEX.md exists
-has_agents_index() {
-    local agents_dir
-    agents_dir=$(find_agents_dir "$1")
-
-    [ -d "$agents_dir" ] && [ -f "$agents_dir/INDEX.md" ]
-}
-
-# Load all agents context markdown files
-# Returns concatenated content from INDEX.md first, then other .md files
-# Excludes ORCHESTRATION.md (that's for the parent, not workers)
-load_agents_context() {
-    local repo_root="${1:-$REPO_DIR}"
-    local agents_dir
-    agents_dir=$(find_agents_dir "$repo_root")
-
-    if ! has_agents_index "$repo_root"; then
-        return 1
-    fi
-
-    local context=""
-
-    # Read INDEX.md first
-    if [ -f "$agents_dir/INDEX.md" ]; then
-        context+="## Index\n\n"
-        context+="$(cat "$agents_dir/INDEX.md")\n\n"
-    fi
-
-    # Read other markdown files (sorted alphabetically)
-    # Skip ORCHESTRATION.md - that's for the parent orchestrator
-    for file in "$agents_dir"/*.md; do
-        [ -f "$file" ] || continue
-        local basename
-        basename=$(basename "$file")
-        if [ "$basename" != "INDEX.md" ] && [ "$basename" != "ORCHESTRATION.md" ]; then
-            local name="${basename%.md}"
-            context+="## $name\n\n"
-            context+="$(cat "$file")\n\n"
-        fi
-    done
-
-    echo -e "$context"
-}
-
-# Build the full spawn prompt with agents context and task context
-build_spawn_prompt() {
-    local task_context="$1"
-    local repo_root="${2:-$REPO_DIR}"
-
-    local prompt=""
-
-    # Add agents context if available
-    if has_agents_index "$repo_root"; then
-        prompt+="# Agent Context\n\n"
-        prompt+="$(load_agents_context "$repo_root")\n"
-    fi
-
-    # Add task context
-    if [ -n "$task_context" ]; then
-        prompt+="# Task\n\n"
-        prompt+="$task_context"
-    fi
-
-    echo -e "$prompt"
-}
