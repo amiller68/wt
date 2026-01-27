@@ -191,8 +191,13 @@ new template structure with any valuable customizations from the backup.
    from .wt-backup/CLAUDE.md (versioning rules, testing instructions, etc.)
 6. Review .wt-backup/.claude/commands/ for any custom commands and copy them to
    .claude/commands/ if they are not already present from the template
-7. Do NOT modify docs/issue-tracking.md (this is a generic guide)
-8. Commit your changes with a clear message'
+7. Update .claude/commands/ to align with this project:
+   - check.md: replace generic detection with the actual build/test/lint commands for this project
+   - review.md: reference project-specific conventions, patterns files, or contributing guides
+   - Other commands: adjust allowed-tools and steps to match the project toolchain
+   Keep the YAML frontmatter structure (description, allowed-tools) intact.
+8. Do NOT modify docs/issue-tracking.md (this is a generic guide)
+9. Commit your changes with a clear message'
     else
         audit_prompt='Explore this codebase and populate the project documentation.
 
@@ -204,8 +209,13 @@ new template structure with any valuable customizations from the backup.
    - How to build, test, and run
    - Code conventions and patterns to follow
    - Common gotchas or important context
-4. Do NOT modify docs/issue-tracking.md (this is a generic guide)
-5. Commit your changes with a clear message'
+4. Update .claude/commands/ to align with this project:
+   - check.md: replace generic detection with the actual build/test/lint commands for this project
+   - review.md: reference project-specific conventions, patterns files, or contributing guides
+   - Other commands: adjust allowed-tools and steps to match the project toolchain
+   Keep the YAML frontmatter structure (description, allowed-tools) intact.
+5. Do NOT modify docs/issue-tracking.md (this is a generic guide)
+6. Commit your changes with a clear message'
     fi
 
     (cd "$REPO_DIR" && claude -p --dangerously-skip-permissions "$audit_prompt")
