@@ -1,52 +1,32 @@
 # Shell Integration
 
-Shell integration makes `wt` more convenient to use.
+The install script sets up shell integration automatically. Here's what it provides.
 
-## Setup
+## Tab Completion
 
-Add to your shell config:
+Works after install:
 
 ```bash
-# ~/.bashrc
-source ~/.wt/shell/wt.bash
-
-# ~/.zshrc
-source ~/.wt/shell/wt.zsh
+wt <TAB>           # Shows: create list open remove exit config update version
+wt open <TAB>      # Shows available worktrees
+wt remove <TAB>    # Shows available worktrees
 ```
 
-## Features
+## How `wt open` Works
 
-### Directory Switching
-
-Without shell integration, `wt open` prints the path. With it, you `cd` directly:
+The `wt` shell function wraps the underlying `_wt` script. When you use `open` or the `-o` flag, the script outputs a `cd` command that the shell function evals:
 
 ```bash
-wt open my-feature  # cd's into the worktree
+wt open my-feature    # cd's into the worktree
+wt create feature -o  # creates and cd's into it
 ```
 
-### Tab Completion
+This is why `wt open` can change your directory — it's a shell function, not an external script.
 
-Complete worktree names:
+## `wt which`
 
-```bash
-wt open my-<TAB>
-# my-feature  my-bugfix  my-experiment
-```
-
-### wt which
-
-Print the current worktree name (useful in prompts):
+Since `wt` is a shell function, `which wt` shows the function definition. Use this instead:
 
 ```bash
-wt which
-# my-feature
-```
-
-## Shell Prompt
-
-Add worktree name to your prompt:
-
-```bash
-# Bash
-PS1='$(wt which 2>/dev/null && echo " ")$PS1'
+wt which    # Shows path to the underlying _wt script
 ```

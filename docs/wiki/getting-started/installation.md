@@ -2,37 +2,43 @@
 
 ## Requirements
 
-- Git 2.15+ (worktree support)
-- Bash 4+
-- tmux (optional, for spawn feature)
+- Git
+- Bash or Zsh
+
+For `wt spawn` (multi-agent orchestration):
+- tmux
+- jq
+- `claude` CLI
+- `gh` CLI
 
 ## Install
 
-Clone and add to your PATH:
-
 ```bash
-git clone https://github.com/amiller68/wt.git ~/.wt
-echo 'export PATH="$HOME/.wt:$PATH"' >> ~/.bashrc
+curl -sSf https://raw.githubusercontent.com/amiller68/worktree/main/install.sh | bash
 ```
 
-## Shell Integration
-
-Add to your `.bashrc` or `.zshrc`:
+Restart your shell or run:
 
 ```bash
-# Bash
-source ~/.wt/shell/wt.bash
-
-# Zsh
-source ~/.wt/shell/wt.zsh
+source ~/.zshrc  # or ~/.bashrc
 ```
-
-This enables:
-- Tab completion
-- `wt` function wrapper (for `cd` into worktrees)
 
 ## Verify
 
 ```bash
-wt --version
+wt version
+```
+
+## Update
+
+```bash
+wt update
+```
+
+## Uninstall
+
+```bash
+rm -rf ~/.local/share/worktree
+rm ~/.local/bin/_wt
+# Remove source lines from ~/.bashrc and ~/.zshrc
 ```

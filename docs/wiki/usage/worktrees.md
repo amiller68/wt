@@ -1,63 +1,91 @@
 # Working with Worktrees
 
-Core commands for creating and managing worktrees.
+Create isolated worktrees for parallel development — each gets its own branch and working directory.
 
-## Create a Worktree
-
-```bash
-wt new my-feature
-```
-
-Creates a new worktree at `.worktrees/my-feature` with a branch named `my-feature`.
-
-### From a Specific Branch
+## Create and Open
 
 ```bash
-wt new my-feature --from main
-wt new my-feature --from origin/develop
+cd ~/projects/my-app
+wt create feature-auth -o    # Creates worktree, cd's into it
+claude                       # Start Claude Code
 ```
 
-## Open a Worktree
+The `-o` flag can be placed anywhere:
+
+```bash
+wt -o create feature-auth    # Same as above
+wt create -o feature-auth    # Also works
+```
+
+## Parallel Sessions
+
+Each worktree is independent. Run multiple Claude Code sessions side by side:
+
+Terminal 1:
+```bash
+wt create feature-auth -o
+claude
+```
+
+Terminal 2:
+```bash
+wt create fix-bug-123 -o
+claude
+```
+
+Both instances work independently with their own branches.
+
+## Open Existing Worktree
 
 ```bash
 wt open my-feature
 ```
 
-With shell integration, this `cd`s into the worktree. Without it, prints the path.
+## Open All in Tabs
+
+Open every worktree in a new terminal tab:
+
+```bash
+wt open --all
+```
+
+Check terminal compatibility with `wt health`.
 
 ## List Worktrees
 
 ```bash
-wt list
+wt list          # Worktrees in .worktrees/
+wt list --all    # All git worktrees
 ```
 
-Shows all worktrees with their branches and status.
-
-## Delete a Worktree
+## Remove Worktrees
 
 ```bash
-wt rm my-feature
+wt remove test1              # Remove exact match
+wt remove 'test*'            # Remove all starting with "test"
+wt remove 'feature/*'        # Remove all under feature/
 ```
 
-Removes the worktree directory. The branch remains (delete separately with `git branch -d`).
+## Nested Paths
 
-### Force Delete
+Branch names with slashes create nested directories:
 
 ```bash
-wt rm my-feature --force
+wt create feature/auth/oauth -o
+# Creates .worktrees/feature/auth/oauth/
 ```
 
-Removes even if there are uncommitted changes.
+## How It Works
 
-## Typical Workflow
+Worktrees are stored in `.worktrees/` inside your repo:
 
-```bash
-# Start new work
-wt new fix-login-bug
-
-# Work on it...
-# (commits, pushes, PR)
-
-# Clean up when done
-wt rm fix-login-bug
 ```
+my-repo/
+├── .worktrees/           # Auto-added to .git/info/exclude
+│   ├── feature-a/
+│   └── feature-b/
+├── src/
+└── ...
+```
+
+Each worktree is a full checkout on its own branch. Changes don't affect other worktrees until you merge.
