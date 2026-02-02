@@ -4,3 +4,6 @@ _wt
 # wt spawn files
 .claude-task
 .claude-spawn-prompt
+
+# Rust build artifacts
+target/

@@ -1,19 +1,46 @@
 # wt - git worktree manager
-# https://github.com/amiller68/worktree
+# https://github.com/amiller68/wt
 
-# Ensure ~/.local/bin is in PATH
+# Ensure ~/.local/bin and ~/.cargo/bin are in PATH
 [[ ":$PATH:" != *":$HOME/.local/bin:"* ]] && export PATH="$HOME/.local/bin:$PATH"
+[[ ":$PATH:" != *":$HOME/.cargo/bin:"* ]] && export PATH="$HOME/.cargo/bin:$PATH"
+
+# Store the real binary name
+_WT_BIN="${_WT_BIN:-wt}"
 
 wt() {
-    # Eval output if command might cd (open, exit, or create with -o flag)
-    # Don't eval when using --all flag (tabs are opened directly)
-    if [[ "$1" == "open" && "$2" == "--all" ]]; then
-        _wt "$@"
-    elif [[ "$1" == "open" || "$1" == "exit" || "$1" == "-o" || "$2" == "-o" || "$*" == *"-o"* ]]; then
-        eval "$(_wt "$@")"
-    else
-        _wt "$@"
-    fi
+    # Commands that might output cd commands for eval
+    local cmd="$1"
+
+    # Handle special cases that need eval
+    case "$cmd" in
+        open)
+            # Don't eval for --all (tabs are opened directly)
+            if [[ "$2" == "--all" ]]; then
+                command "$_WT_BIN" "$@"
+            else
+                eval "$(command "$_WT_BIN" "$@")"
+            fi
+            ;;
+        exit)
+            eval "$(command "$_WT_BIN" "$@")"
+            ;;
+        create)
+            # Check for -o/--open flag anywhere in args
+            local has_open=0
+            for arg in "$@"; do
+                [[ "$arg" == "-o" || "$arg" == "--open" ]] && has_open=1
+            done
+            if [[ $has_open -eq 1 ]]; then
+                eval "$(command "$_WT_BIN" "$@")"
+            else
+                command "$_WT_BIN" "$@"
+            fi
+            ;;
+        *)
+            command "$_WT_BIN" "$@"
+            ;;
+    esac
 }
 
 # Get worktree names for completion (handles nested paths like feature/auth/login)
@@ -22,7 +49,7 @@ _wt_get_worktrees() {
     local wt_dir="$repo/.worktrees"
     [[ -d "$wt_dir" ]] || return
 
-    # Recursively find worktrees (dirs with .git file) without entering their content
+    # Recursively find worktrees (dirs with .git file)
     _find_wt() {
         local dir="$1" prefix="$2"
         for entry in "$dir"/*/; do
@@ -44,20 +71,28 @@ _wt_completion() {
     local -a commands
     commands=(
         'create:Create a new worktree'
+        'open:cd to worktree directory (--all opens in tabs)'
         'list:List worktrees'
         'remove:Remove a worktree'
-        'open:cd to worktree directory (--all opens in tabs)'
         'exit:Exit current worktree (removes it)'
-        'health:Show terminal detection and dependency status'
-        'config:Configure base branch settings'
-        'update:Update wt to latest version'
-        'version:Show version info'
-        'which:Show path to wt script'
+        'config:Configure wt settings'
+        'spawn:Create worktree and launch agent'
+        'ps:Show spawned sessions'
+        'status:Show worker status'
+        'attach:Attach to tmux session'
+        'kill:Kill tmux window'
+        'review:Show diff for review'
+        'merge:Merge worktree'
+        'init:Initialize wt scaffolding'
+        'health:Check system health'
+        'update:Self-update wt'
+        'version:Show version'
+        'which:Show path to wt binary'
+        'completions:Generate shell completions'
     )
 
     if (( CURRENT == 2 )); then
         _describe -t commands 'wt commands' commands
-        compadd -- '-o' '--no-hooks'
     elif (( CURRENT == 3 )); then
         case ${words[2]} in
             open)
@@ -66,28 +101,37 @@ _wt_completion() {
                 compadd -- '--all'
                 [[ ${#worktrees} -gt 0 ]] && _describe -t worktrees 'worktrees' worktrees
                 ;;
-            remove)
+            remove|kill|attach|review|merge)
                 local -a worktrees
                 worktrees=($(_wt_get_worktrees))
                 [[ ${#worktrees} -gt 0 ]] && _describe -t worktrees 'worktrees' worktrees
                 ;;
             list)
-                compadd -- '--all'
+                compadd -- '--all' '--json'
+                ;;
+            config)
+                compadd -- 'show' 'base' 'on-create' 'list'
+                ;;
+            init)
+                compadd -- '--force' '--fix' '--backup' '--audit'
                 ;;
             update)
                 compadd -- '--force'
                 ;;
-            config)
-                compadd -- 'base' 'on-create' '--list'
+            create)
+                compadd -- '--branch' '--open' '--no-hooks'
                 ;;
-            -o|--no-hooks)
-                compadd -- 'create'
+            spawn)
+                compadd -- '--context' '--issue' '--parent' '--auto'
+                ;;
+            completions)
+                compadd -- 'bash' 'zsh' 'fish' 'powershell' 'elvish'
                 ;;
         esac
     elif (( CURRENT == 4 )); then
         case ${words[3]} in
             base)
-                compadd -- '--global' '--unset'
+                compadd -- '--global'
                 ;;
             on-create)
                 compadd -- '--unset'

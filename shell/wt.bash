@@ -1,19 +1,46 @@
 # wt - git worktree manager
-# https://github.com/amiller68/worktree
+# https://github.com/amiller68/wt
 
-# Ensure ~/.local/bin is in PATH
+# Ensure ~/.local/bin and ~/.cargo/bin are in PATH
 [[ ":$PATH:" != *":$HOME/.local/bin:"* ]] && export PATH="$HOME/.local/bin:$PATH"
+[[ ":$PATH:" != *":$HOME/.cargo/bin:"* ]] && export PATH="$HOME/.cargo/bin:$PATH"
+
+# Store the real binary name
+_WT_BIN="${_WT_BIN:-wt}"
 
 wt() {
-    # Eval output if command might cd (open, exit, or create with -o flag)
-    # Don't eval when using --all flag (tabs are opened directly)
-    if [[ "$1" == "open" && "$2" == "--all" ]]; then
-        _wt "$@"
-    elif [[ "$1" == "open" || "$1" == "exit" || "$1" == "-o" || "$2" == "-o" || "$*" == *"-o"* ]]; then
-        eval "$(_wt "$@")"
-    else
-        _wt "$@"
-    fi
+    # Commands that might output cd commands for eval
+    local cmd="$1"
+
+    # Handle special cases that need eval
+    case "$cmd" in
+        open)
+            # Don't eval for --all (tabs are opened directly)
+            if [[ "$2" == "--all" ]]; then
+                command "$_WT_BIN" "$@"
+            else
+                eval "$(command "$_WT_BIN" "$@")"
+            fi
+            ;;
+        exit)
+            eval "$(command "$_WT_BIN" "$@")"
+            ;;
+        create)
+            # Check for -o/--open flag anywhere in args
+            local has_open=0
+            for arg in "$@"; do
+                [[ "$arg" == "-o" || "$arg" == "--open" ]] && has_open=1
+            done
+            if [[ $has_open -eq 1 ]]; then
+                eval "$(command "$_WT_BIN" "$@")"
+            else
+                command "$_WT_BIN" "$@"
+            fi
+            ;;
+        *)
+            command "$_WT_BIN" "$@"
+            ;;
+    esac
 }
 
 # Get worktree names for completion (handles nested paths like feature/auth/login)
@@ -22,7 +49,7 @@ _wt_get_worktrees() {
     local wt_dir="$repo/.worktrees"
     [[ -d "$wt_dir" ]] || return
 
-    # Recursively find worktrees (dirs with .git file) without entering their content
+    # Recursively find worktrees (dirs with .git file)
     _find_wt() {
         local dir="$1" prefix="$2"
         for entry in "$dir"/*/; do
@@ -42,40 +69,53 @@ _wt_get_worktrees() {
 _wt_complete() {
     local cur=${COMP_WORDS[COMP_CWORD]}
     local prev=${COMP_WORDS[COMP_CWORD-1]}
+    local cmd=${COMP_WORDS[1]}
 
     if [[ $COMP_CWORD -eq 1 ]]; then
-        COMPREPLY=($(compgen -W "create list remove open exit health config update version which -o --no-hooks" -- "$cur"))
+        COMPREPLY=($(compgen -W "create open list remove exit config spawn ps status attach kill review merge init health update version which completions" -- "$cur"))
     elif [[ $COMP_CWORD -eq 2 ]]; then
         case $prev in
             open)
                 local worktrees=$(_wt_get_worktrees)
-                [[ -n "$worktrees" ]] && COMPREPLY=($(compgen -W "--all $worktrees" -- "$cur"))
-                [[ -z "$worktrees" ]] && COMPREPLY=($(compgen -W "--all" -- "$cur"))
+                COMPREPLY=($(compgen -W "--all $worktrees" -- "$cur"))
                 ;;
-            remove)
+            remove|kill|attach|review|merge)
                 local worktrees=$(_wt_get_worktrees)
                 [[ -n "$worktrees" ]] && COMPREPLY=($(compgen -W "$worktrees" -- "$cur"))
                 ;;
             list)
-                COMPREPLY=($(compgen -W "--all" -- "$cur"))
+                COMPREPLY=($(compgen -W "--all --json" -- "$cur"))
+                ;;
+            config)
+                COMPREPLY=($(compgen -W "show base on-create list" -- "$cur"))
+                ;;
+            init)
+                COMPREPLY=($(compgen -W "--force --fix --backup --audit" -- "$cur"))
                 ;;
             update)
                 COMPREPLY=($(compgen -W "--force" -- "$cur"))
                 ;;
-            config)
-                COMPREPLY=($(compgen -W "base on-create --list" -- "$cur"))
+            spawn)
+                COMPREPLY=($(compgen -W "--context --issue --parent --auto" -- "$cur"))
                 ;;
-            -o|--no-hooks)
-                COMPREPLY=($(compgen -W "create" -- "$cur"))
+            create)
+                COMPREPLY=($(compgen -W "--branch --open --no-hooks" -- "$cur"))
+                ;;
+            completions)
+                COMPREPLY=($(compgen -W "bash zsh fish powershell elvish" -- "$cur"))
                 ;;
         esac
-    elif [[ $COMP_CWORD -eq 3 ]]; then
-        case ${COMP_WORDS[2]} in
-            base)
-                COMPREPLY=($(compgen -W "--global --unset" -- "$cur"))
-                ;;
-            on-create)
-                COMPREPLY=($(compgen -W "--unset" -- "$cur"))
+    elif [[ $COMP_CWORD -ge 3 ]]; then
+        case $cmd in
+            config)
+                case ${COMP_WORDS[2]} in
+                    base)
+                        COMPREPLY=($(compgen -W "--global" -- "$cur"))
+                        ;;
+                    on-create)
+                        COMPREPLY=($(compgen -W "--unset" -- "$cur"))
+                        ;;
+                esac
                 ;;
         esac
     fi

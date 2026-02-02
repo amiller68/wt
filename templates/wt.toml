@@ -1,0 +1,16 @@
+# wt configuration for {project_name}
+
+[repo]
+base_branch = "main"
+worktree_dir = ".worktrees"
+
+[agent]
+type = "claude-code"
+
+[hooks]
+# on_create = "npm install"  # Command to run after worktree creation
+
+[adapters.claude-code]
+command = "claude"
+skills_dir = ".claude/skills"
+context_flag = "--prompt"
