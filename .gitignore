@@ -4,3 +4,8 @@ _wt
 # wt spawn files
 .claude-task
 .claude-spawn-prompt
+
+
+# Added by cargo
+
+/target
