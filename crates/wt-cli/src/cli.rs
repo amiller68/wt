@@ -163,6 +163,13 @@ pub enum Commands {
         /// Worker name
         name: Option<String>,
     },
+
+    /// Print shell integration code
+    #[command(name = "shell-init")]
+    ShellInit {
+        /// Shell type (bash, zsh, fish)
+        shell: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]

@@ -67,6 +67,7 @@ fn run() -> Result<()> {
         Some(Commands::Health) => commands::health(),
         Some(Commands::Tui) => commands::tui(),
         Some(Commands::Status { name }) => commands::status(name.as_deref()),
+        Some(Commands::ShellInit { shell }) => commands::shell_init(&shell),
     }
 }
 

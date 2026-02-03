@@ -15,6 +15,7 @@ mod update;
 mod version;
 mod which;
 mod health;
+mod shell_init;
 mod status;
 mod tui;
 
@@ -35,5 +36,6 @@ pub use update::run as update;
 pub use version::run as version;
 pub use which::run as which;
 pub use health::run as health;
+pub use shell_init::run as shell_init;
 pub use status::run as status;
 pub use tui::run as tui;
